@@ -1,0 +1,25 @@
+{
+  "block_max_capacity": {
+    "l1_gas": 10000000,
+    "message_segment_length": 10000,
+    "n_events": 5000,
+    "state_diff_size": 4000,
+    "sierra_gas": 5000000000,
+    "n_txs": 600,
+    "proving_gas": 5000000000,
+    "receipt_l2_gas": 5800000000
+  },
+  "builtin_instance_limits": {
+    "pedersen": 2000000,
+    "range_check": 66666666,
+    "range_check96": 33519553,
+    "poseidon": 600000,
+    "ecdsa": 3000,
+    "ecop": 130000,
+    "bitwise": 10500000,
+    "keccak": 10000,
+    "add_mod": 3000000,
+    "mul_mod": 3000000,
+    "blake": 1800000
+  }
+}

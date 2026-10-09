@@ -1,0 +1,5 @@
+[toolchain]
+# Nightly for the threaded wasm build (-Z build-std); native builds use it too.
+channel = "nightly-2026-01-15"
+components = ["rust-src"]
+targets = ["wasm32-unknown-unknown"]

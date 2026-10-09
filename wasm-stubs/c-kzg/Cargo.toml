@@ -1,0 +1,20 @@
+[package]
+name = "c-kzg"
+version = "2.1.5"
+edition = "2021"
+description = "wasm stub: same API surface starknet_os uses, every KZG operation returns an error"
+
+[lib]
+path = "src/lib.rs"
+
+# Feature names other workspace crates (alloy) request; they do nothing here.
+[features]
+default = ["std", "portable", "ethereum_kzg_settings"]
+arbitrary = []
+ethereum_kzg_settings = []
+generate-bindings = []
+generate-fuzz-corpus = []
+no-threads = []
+portable = []
+serde = []
+std = []
