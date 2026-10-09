@@ -15,9 +15,10 @@ WebAssembly (threaded, on Web Workers; outis.cash/prover). Status: testing. No r
 | `crates/os_wasm_probe` | The pipeline. `TxSession` (wasm and native): the transaction's execution and storage proofs from RPC reads, the virtual OS input, the OS run, the proof. `os_native_probe`: the native command line. `replay`: the C entry point `tx_prove_replay` with progress events, for the apps. |
 | `js/tx-driver.mjs` | The JavaScript side of `TxSession`: the RPC reads and the miss loop, over any async RPC. |
 | `js/replay.mjs` | Proves a capture with the wasm build in Node. |
+| `js/worker.mjs` | The web engine's worker: proves a bundled capture in a browser and reports progress and the result (outis.cash/prover). |
 | `captures/` | Four Privacy Pool transactions on Starknet Sepolia (register, deposit, pay, withdraw): the recorded RPC answers, the prove request and the native prover's response, the reference for byte identity. The contract classes are in `captures/classes`, symlinked from each capture (on Windows, enable git's `core.symlinks`). |
 | `wasm-stubs/c-kzg` | An empty `c-kzg`: the C library has no wasm32 build, and the proving path never calls it. |
-| `scripts/` | `build-native.sh`, `build-wasm.sh [node\|web]`. |
+| `scripts/` | `build-native.sh`, `build-wasm.sh [node\|web]`, `build-web-engine.sh <out>` (the worker, the wasm and the captures, for a page that proves in the browser). |
 
 ## Upstream
 
@@ -48,7 +49,12 @@ scripts/build-wasm.sh node
 node js/replay.mjs captures/pay --prove                 # the same, in wasm (single-threaded)
 
 scripts/build-wasm.sh web                               # pkg-mt/, for browsers (COOP/COEP)
+scripts/build-web-engine.sh ../outis/wallet/apps/prover/public   # outis.cash/prover's engine
 ```
+
+The Outis Prover apps (iOS and Android) link the pipeline as a static library built from this
+repository (`--crate-type staticlib` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and
+`aarch64-linux-android`) and bundle the captures.
 
 ## Measured
 

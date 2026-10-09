@@ -4,3 +4,4 @@ target-wasm-mt/
 js/node/
 pkg-mt/
 replay-out/
+.venv/
