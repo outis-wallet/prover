@@ -113,6 +113,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 [[package]]
 name = "apollo_compile_to_native_types"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_config",
  "serde",
@@ -122,6 +123,7 @@ dependencies = [
 [[package]]
 name = "apollo_config"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_infra_utils",
  "clap",
@@ -139,6 +141,7 @@ dependencies = [
 [[package]]
 name = "apollo_infra_utils"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_proc_macros",
  "num_enum",
@@ -155,6 +158,7 @@ dependencies = [
 [[package]]
 name = "apollo_metrics"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_time",
  "const_format",
@@ -168,6 +172,7 @@ dependencies = [
 [[package]]
 name = "apollo_proc_macros"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_proc_macros_lib",
  "metrics",
@@ -176,6 +181,7 @@ dependencies = [
 [[package]]
 name = "apollo_proc_macros_lib"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -186,6 +192,7 @@ dependencies = [
 [[package]]
 name = "apollo_sizeof"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_sizeof_macros",
  "starknet-types-core",
@@ -194,6 +201,7 @@ dependencies = [
 [[package]]
 name = "apollo_sizeof_macros"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -203,6 +211,7 @@ dependencies = [
 [[package]]
 name = "apollo_starknet_os_program"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_infra_utils",
  "cairo-vm",
@@ -217,6 +226,7 @@ dependencies = [
 [[package]]
 name = "apollo_time"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "chrono",
 ]
@@ -814,6 +824,7 @@ dependencies = [
 [[package]]
 name = "blockifier"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "anyhow",
  "apollo_compile_to_native_types",
@@ -962,6 +973,7 @@ dependencies = [
 [[package]]
 name = "cairo-air"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "bincode",
  "bzip2",
@@ -1591,6 +1603,7 @@ dependencies = [
 [[package]]
 name = "cairo-program-runner-lib"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "anyhow",
  "cairo-lang-casm",
@@ -1695,12 +1708,13 @@ dependencies = [
 [[package]]
 name = "circuit-cairo-verifier"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "cairo-air",
  "circuit-common",
  "circuits",
  "circuits-stark-verifier",
- "hashbrown 0.17.1",
+ "hashbrown 0.15.5",
  "indexmap 2.14.0",
  "itertools 0.12.1",
  "num-traits",
@@ -1713,6 +1727,7 @@ dependencies = [
 [[package]]
 name = "circuit-common"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "circuits",
  "circuits-stark-verifier",
@@ -1727,6 +1742,7 @@ dependencies = [
 [[package]]
 name = "circuit-prover"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "circuit-common",
  "circuit-verifier",
@@ -1748,6 +1764,7 @@ dependencies = [
 [[package]]
 name = "circuit-registry"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "circuit-common",
  "leaf-proof-format",
@@ -1761,6 +1778,7 @@ dependencies = [
 [[package]]
 name = "circuit-serialize"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "circuits",
  "circuits-stark-verifier",
@@ -1770,6 +1788,7 @@ dependencies = [
 [[package]]
 name = "circuit-verifier"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "circuit-common",
  "circuits",
@@ -1784,9 +1803,10 @@ dependencies = [
 [[package]]
 name = "circuits"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "blake2",
- "hashbrown 0.17.1",
+ "hashbrown 0.15.5",
  "indexmap 2.14.0",
  "itertools 0.12.1",
  "num-traits",
@@ -1798,9 +1818,10 @@ dependencies = [
 [[package]]
 name = "circuits-stark-verifier"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "circuits",
- "hashbrown 0.17.1",
+ "hashbrown 0.15.5",
  "indexmap 2.14.0",
  "itertools 0.12.1",
  "num-traits",
@@ -2705,6 +2726,7 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.1.5",
+ "serde",
 ]
 
 [[package]]
@@ -3184,6 +3206,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 [[package]]
 name = "leaf-proof-format"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "serde",
  "serde_with",
@@ -3192,6 +3215,7 @@ dependencies = [
 [[package]]
 name = "leaf-prover"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "cairo-air",
  "cairo-program-runner-lib",
@@ -3602,6 +3626,7 @@ dependencies = [
 [[package]]
 name = "papyrus_common"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "cairo-lang-starknet-classes",
  "indexmap 2.14.0",
@@ -3896,6 +3921,7 @@ dependencies = [
 [[package]]
 name = "privacy-circuit-verify"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "anyhow",
  "cairo-air",
@@ -3919,6 +3945,7 @@ dependencies = [
 [[package]]
 name = "privacy-prove"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "anyhow",
  "cairo-air",
@@ -4702,6 +4729,7 @@ dependencies = [
 [[package]]
 name = "shared_execution_objects"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "blockifier",
  "serde",
@@ -5037,6 +5065,7 @@ dependencies = [
 [[package]]
 name = "starknet_api"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_infra_utils",
  "apollo_sizeof",
@@ -5073,6 +5102,7 @@ dependencies = [
 [[package]]
 name = "starknet_committer"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_config",
  "async-trait",
@@ -5103,6 +5133,7 @@ dependencies = [
 [[package]]
 name = "starknet_os"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_starknet_os_program",
  "ark-bls12-381",
@@ -5148,6 +5179,7 @@ dependencies = [
 [[package]]
 name = "starknet_patricia"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "async-recursion",
  "derive_more",
@@ -5167,6 +5199,7 @@ dependencies = [
 [[package]]
 name = "starknet_patricia_storage"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_config",
  "async-trait",
@@ -5185,6 +5218,7 @@ dependencies = [
 [[package]]
 name = "starknet_proof_verifier"
 version = "0.20.0-rc.0"
+source = "git+https://github.com/outis-wallet/sequencer?rev=845e2146180de5f2d2aa8212504616c6f35eedd0#845e2146180de5f2d2aa8212504616c6f35eedd0"
 dependencies = [
  "apollo_sizeof",
  "privacy-circuit-verify",
@@ -5242,6 +5276,7 @@ dependencies = [
 [[package]]
 name = "stwo"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "blake2",
  "blake3",
@@ -5250,7 +5285,7 @@ dependencies = [
  "dashmap",
  "educe 0.5.11",
  "fnv",
- "hashbrown 0.17.1",
+ "hashbrown 0.15.5",
  "hex",
  "indexmap 2.14.0",
  "itertools 0.12.1",
@@ -5270,6 +5305,7 @@ dependencies = [
 [[package]]
 name = "stwo-air-utils"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "bytemuck",
  "itertools 0.12.1",
@@ -5281,6 +5317,7 @@ dependencies = [
 [[package]]
 name = "stwo-air-utils-derive"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "itertools 0.12.1",
  "proc-macro2",
@@ -5291,6 +5328,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-adapter"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5309,6 +5347,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-common"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "bytemuck",
  "itertools 0.12.1",
@@ -5327,6 +5366,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-prover"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5358,6 +5398,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-serialize"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "starknet-ff",
  "stwo",
@@ -5367,6 +5408,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-serialize-derive"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "quote",
  "syn 2.0.110",
@@ -5375,6 +5417,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-utils"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
  "env_logger",
  "log",
@@ -5385,8 +5428,9 @@ dependencies = [
 [[package]]
 name = "stwo-constraint-framework"
 version = "2.4.0"
+source = "git+https://github.com/outis-wallet/proving?rev=6a6427ff0ae463a9b25e72370844b5c815f78c8e#6a6427ff0ae463a9b25e72370844b5c815f78c8e"
 dependencies = [
- "hashbrown 0.17.1",
+ "hashbrown 0.15.5",
  "itertools 0.12.1",
  "num-traits",
  "rand 0.9.5",
