@@ -50,6 +50,16 @@ use wasm_bindgen::prelude::*;
 #[cfg(all(target_arch = "wasm32", feature = "threads"))]
 pub use wasm_bindgen_rayon::init_thread_pool;
 
+/// Ends the thread pool's threads, each by trapping out of wasm into its worker's JavaScript. Safari
+/// can't end a worker parked in a wasm atomic wait, where the pool's threads wait for work, so their
+/// workers (and the run's memory, which they share) outlived the page's `terminate()`. After this
+/// the pool is gone: call it once the last proof of this instance is done.
+#[cfg(all(target_arch = "wasm32", feature = "threads"))]
+#[wasm_bindgen]
+pub fn stop_threads() {
+    rayon::spawn_broadcast(|_| std::process::abort());
+}
+
 use crate::executor::{BaseBlockInfo, BlockHeader, VirtualBlockExecutionData};
 use crate::state_reader::PrefetchedState;
 use crate::storage_proofs::RpcStorageProofsQuery;

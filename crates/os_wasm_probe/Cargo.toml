@@ -44,8 +44,9 @@ js-sys = "=0.3.103"
 rayon = "1.11"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# A rayon thread pool on Web Workers sharing the module's memory.
+# A rayon thread pool on Web Workers sharing the module's memory; rayon itself for stop_threads.
 wasm-bindgen-rayon = { version = "1.3", optional = true }
+rayon = { version = "1.11", optional = true }
 # Without `nightly`, parking_lot_core's wasm parker panics on any park, which kills a rayon worker
 # the first time a DashMap lock is contended (the adapter's MemoryBuilder) and hangs the proof.
 parking_lot_core = { version = "0.9", optional = true, features = ["nightly"] }
@@ -57,4 +58,4 @@ getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] 
 
 [features]
 # The threaded build (needs atomics and shared memory).
-threads = ["dep:wasm-bindgen-rayon", "dep:parking_lot_core"]
+threads = ["dep:wasm-bindgen-rayon", "dep:parking_lot_core", "dep:rayon"]

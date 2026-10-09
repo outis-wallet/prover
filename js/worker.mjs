@@ -25,14 +25,61 @@ async function wasmBytes(url) {
   return new Uint8Array(await new Response(inflated).arrayBuffer());
 }
 
-self.onmessage = async ({ data: { action, threads } }) => {
+// The workers this one starts: wasm-bindgen-rayon's thread pool and the memory watcher. Safari can't
+// end a worker parked in a wasm atomic wait, where the pool's threads wait for work: ending this
+// worker (or the page's reload) left them, and the run's memory they share (2+ GiB), for as long as
+// the tab was open, and the next proof in the tab failed. So when a run is over, stop_threads traps
+// the pool's threads out of wasm, and their workers are ended here, before the outcome is posted
+// (the page ends this worker when it gets it).
+const children = [];
+self.Worker = class extends Worker {
+  constructor(...args) {
+    super(...args);
+    children.push(this);
+  }
+};
+async function endChildren() {
+  try {
+    pkg.stop_threads();
+    // Time for the threads to wake and leave wasm before their workers are ended.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } catch {}
+  children.splice(0).forEach((worker) => worker.terminate());
+}
+
+// The page's memory figure. This worker is inside long synchronous calls (the OS run, the proof),
+// so a worker of its own reads the shared wasm memory's size every 250 ms and posts it, in MiB, on
+// the port the page sent. The page never holds the memory: its reference would keep it until the
+// page's garbage collector ran.
+const WATCHER = `onmessage = ({ data: { memory, port } }) => {
+  postMessage("ready");
+  setInterval(() => port.postMessage(Math.round(memory.buffer.byteLength / 2 ** 20)), 250);
+};`;
+
+function watchMemory(memory, port) {
+  const watcher = new Worker(URL.createObjectURL(new Blob([WATCHER], { type: "text/javascript" })));
+  watcher.postMessage({ memory, port }, [port]);
+  // Running before this worker blocks: a worker may not start while its parent is busy.
+  return new Promise((resolve) => { watcher.onmessage = watcher.onerror = resolve; });
+}
+
+// The prover's panic message: its panic hook writes it to console.error just before the trap,
+// whose own message is only "unreachable". Kept to send with the error.
+let panicMessage = "";
+const consoleError = console.error.bind(console);
+console.error = (...args) => {
+  panicMessage = args.join(" ");
+  consoleError(...args);
+};
+
+self.onmessage = async ({ data: { action, threads, memoryPort } }) => {
   const event = (payload) => self.postMessage({ event: payload });
   const since = (start) => (performance.now() - start) / 1000;
   try {
     const started = performance.now();
     event({ event: "phase", phase: "state" });
     const wasm = await pkg.default({ module_or_path: await wasmBytes(WASM) });
-    self.postMessage({ memory: wasm.memory });
+    if (memoryPort) await watchMemory(wasm.memory, memoryPort);
     await pkg.initThreadPool(threads);
     const loadS = since(started);
 
@@ -83,6 +130,8 @@ self.onmessage = async ({ data: { action, threads } }) => {
     const result = JSON.parse(resultJson);
     const native = (await fetchJson(`${capture}response.json`)).result;
     const { identical, facts, messages } = compareWithNative(result, native);
+    const totalS = since(started);
+    await endChildren();
     self.postMessage({
       report: {
         build: BUILD,
@@ -95,7 +144,7 @@ self.onmessage = async ({ data: { action, threads } }) => {
         os_s: osS,
         prove_s: proveS,
         verify_s: verifyS,
-        total_s: since(started),
+        total_s: totalS,
         os_steps: osSteps,
         verified,
         verify_error: verifyError,
@@ -106,6 +155,16 @@ self.onmessage = async ({ data: { action, threads } }) => {
       },
     });
   } catch (error) {
-    self.postMessage({ error: String(error && error.stack ? error.stack : error) });
+    // Safari's stack has no message line (Chrome's starts with it): send the message too. And a
+    // panic's message, and the memory then (an allocation that fails aborts without a message).
+    const message = String(error);
+    const stack = error && error.stack ? String(error.stack) : "";
+    let memory = "";
+    try {
+      memory = `memory: ${pkg.memory_report()} MiB`;
+    } catch {}
+    const lines = [panicMessage && `panic: ${panicMessage}`, memory, stack.includes(message) ? stack : [message, stack].filter(Boolean).join("\n")];
+    await endChildren();
+    self.postMessage({ error: lines.filter(Boolean).join("\n") });
   }
 };
