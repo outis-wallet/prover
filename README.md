@@ -61,6 +61,11 @@ repository (`--crate-type staticlib` for `aarch64-apple-ios`, `aarch64-apple-ios
 Native, `os_native_probe replay` on the four captures (x86-64, 36 threads): proving 9.6 to
 10.6 s, peak RSS about 2.8 GiB, every proof verified and byte-identical to the reference.
 
+WebAssembly in Chrome on the same machine (18 cores), 16 threads: proving 13.7 to 15.2 s, wasm
+memory about 2.5 GiB, every proof verified and byte-identical. A single thread runs about 1.3x
+native. wasm32's system allocator is one dlmalloc behind one spin lock; `memory.rs` keeps small
+blocks off it, without which the proof got slower past about 8 threads.
+
 ## Credits
 
 StarkWare, for the sequencer and the prover. The contributors to the provably.fast challenge

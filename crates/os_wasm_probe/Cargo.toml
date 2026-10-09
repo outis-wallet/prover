@@ -49,6 +49,8 @@ wasm-bindgen-rayon = { version = "1.3", optional = true }
 # Without `nightly`, parking_lot_core's wasm parker panics on any park, which kills a rayon worker
 # the first time a DashMap lock is contended (the adapter's MemoryBuilder) and hangs the proof.
 parking_lot_core = { version = "0.9", optional = true, features = ["nightly"] }
+# The block cache's heap for small blocks (memory.rs).
+dlmalloc = "0.2"
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
