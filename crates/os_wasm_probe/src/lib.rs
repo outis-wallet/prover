@@ -558,9 +558,14 @@ impl TxSession {
             self.run_os()?;
         }
         let pie = self.pie.take().expect("the virtual OS ran");
-        let precomputes = privacy_prove::prepare_recursive_prover_precomputes()
-            .map_err(|e| fail(&format!("precomputes: {e}")))?;
-        let output = privacy_prove::privacy_recursive_prove(pie, precomputes)
+        // What built the OS input is of no more use: it goes before the proof's peak.
+        self.maps = StateMaps::default();
+        self.classes = HashMap::new();
+        self.execution = None;
+        self.query = None;
+        // One proof per session: each leg's precomputes go when the leg ends, and none outlive
+        // the proof.
+        let output = privacy_prove::privacy_recursive_prove_once(pie)
             .map_err(|e| fail(&format!("prover: {e}")))?;
         let proof = Proof::from(output.proof);
         let proof_facts = ProgramOutput::from(output.output_preimage)
