@@ -45,7 +45,7 @@ const started = Date.now();
 const { session, osInputJson } = await buildOsInput({ TxSession, rpc, chainId: "SN_SEPOLIA", transaction, simulate: true, placeholders: false, log: console.log });
 const built = Date.now();
 memory("input built");
-fs.writeFileSync(path.join(out, "virtual-os-input.wasm.json"), osInputJson);
+if (osInputJson !== null) fs.writeFileSync(path.join(out, "virtual-os-input.wasm.json"), osInputJson);
 console.log(`input built in ${((built - started) / 1000).toFixed(2)} s from ${served.length} calls: ${[...new Set(served)].join(", ")}`);
 console.log(`${session.run_os()} in ${((Date.now() - built) / 1000).toFixed(2)} s`);
 memory("virtual OS done");

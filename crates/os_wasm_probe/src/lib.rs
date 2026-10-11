@@ -7,11 +7,15 @@ mod errors;
 mod executor;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod native;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod replay;
 mod state_reader;
 mod storage_proofs;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use blockifier::context::{ChainInfo, FeeTokenAddresses};
@@ -324,6 +328,9 @@ pub struct TxSession {
     l2_to_l1_messages: Vec<MessageToL1>,
     pie: Option<CairoPie>,
     placeholders: bool,
+    /// Natively, set to stop the session's work (see `native`): `prove` returns at its next step.
+    #[cfg(not(target_arch = "wasm32"))]
+    cancel: Arc<AtomicBool>,
 }
 
 #[wasm_bindgen]
@@ -383,6 +390,8 @@ impl TxSession {
             l2_to_l1_messages: Vec::new(),
             pie: None,
             placeholders: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            cancel: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -477,10 +486,12 @@ impl TxSession {
         self.query = Some((query, split));
         Ok(serde_json::json!({ "storage_proof_params": params }).to_string())
     }
+}
 
-    /// Takes the `starknet_getStorageProof` results (a JSON array, one per requested params),
-    /// builds the virtual OS input and returns it as JSON (the native dump's format).
-    pub fn set_storage_proofs(&mut self, storage_proofs_json: &str) -> Result<String, Failure> {
+impl TxSession {
+    /// `set_storage_proofs` without the input's JSON (natively nothing reads it): builds the
+    /// virtual OS input from the `starknet_getStorageProof` results and keeps it for `run_os`.
+    pub fn build_os_input(&mut self, storage_proofs_json: &str) -> Result<(), Failure> {
         let (execution, state) =
             self.execution.take().ok_or_else(|| fail("execute first"))?;
         let (query, split) = self.query.take().ok_or_else(|| fail("execute first"))?;
@@ -555,10 +566,19 @@ impl TxSession {
             prev_base_block_hash: base.prev_base_block_hash,
             compiled_classes,
         };
-        let json = serde_json::to_string(&input).map_err(js_error)?;
         self.os_input = Some(input);
         self.l2_to_l1_messages = execution.l2_to_l1_messages;
-        Ok(json)
+        Ok(())
+    }
+}
+
+#[wasm_bindgen]
+impl TxSession {
+    /// Takes the `starknet_getStorageProof` results (a JSON array, one per requested params),
+    /// builds the virtual OS input and returns it as JSON (the native dump's format).
+    pub fn set_storage_proofs(&mut self, storage_proofs_json: &str) -> Result<String, Failure> {
+        self.build_os_input(storage_proofs_json)?;
+        serde_json::to_string(self.os_input.as_ref().expect("just built")).map_err(js_error)
     }
 
     /// Runs the virtual OS on the built input; returns the PIE summary.
@@ -576,6 +596,8 @@ impl TxSession {
         if self.pie.is_none() {
             self.run_os()?;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.check_cancel()?;
         let pie = self.pie.take().expect("the virtual OS ran");
         // What built the OS input is of no more use: it goes before the proof's peak.
         self.maps = StateMaps::default();
@@ -583,9 +605,12 @@ impl TxSession {
         self.execution = None;
         self.query = None;
         // One proof per session: each leg's precomputes go when the leg ends, and none outlive
-        // the proof.
-        let output = privacy_prove::privacy_recursive_prove_once(pie)
-            .map_err(|e| fail(&format!("prover: {e}")))?;
+        // the proof. Natively, the session's cancel flag stops it between steps.
+        #[cfg(target_arch = "wasm32")]
+        let output = privacy_prove::privacy_recursive_prove_once(pie);
+        #[cfg(not(target_arch = "wasm32"))]
+        let output = privacy_prove::privacy_recursive_prove_once_stoppable(pie, &self.cancel);
+        let output = output.map_err(|e| fail(&format!("prover: {e}")))?;
         let proof = Proof::from(output.proof);
         let proof_facts = ProgramOutput::from(output.output_preimage)
             .try_into_proof_facts(VIRTUAL_SNOS)
@@ -603,6 +628,17 @@ impl TxSession {
     /// Cairo steps of the virtual OS run, once `run_os` ran (until `prove` takes the run).
     pub fn os_steps(&self) -> Option<usize> {
         self.pie.as_ref().map(|pie| pie.execution_resources.n_steps)
+    }
+
+    /// Natively, the flag that stops this session's work (see `native`), in place of its own.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_cancel_flag(&mut self, cancel: Arc<AtomicBool>) {
+        self.cancel = cancel;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn check_cancel(&self) -> Result<(), Failure> {
+        if self.cancel.load(Ordering::Relaxed) { Err(fail("cancelled")) } else { Ok(()) }
     }
 }
 

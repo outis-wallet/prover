@@ -1,6 +1,6 @@
-// Builds the virtual OS input for one transaction with the wasm TxSession. All network access
-// goes through `rpc(method, params)`, so the same code runs against a live node (browser, Node)
-// or a recording.
+// Builds the virtual OS input for one transaction with the wasm TxSession, or with any session of
+// the same methods (the native one in the apps). All network access goes through
+// `rpc(method, params)`, so the same code runs against a live node (browser, Node) or a recording.
 
 const SIMULATION_FLAGS = ["RETURN_INITIAL_READS", "SKIP_FEE_CHARGE"];
 // A payment read 26 values one round at a time; with placeholders and the reads it is told about
@@ -25,9 +25,20 @@ const NO_READS = { storage: [], nonces: [], class_hashes: [] };
  *
  * `onTransaction({block, tx_hash})` reports the base block and the transaction's hash once known;
  * `onPhase("execute")` is called before each execution round (the first one ends reading state).
+ *
+ * The session is `new TxSession(chainId, headerJson, transactionJson)` (the wasm one), or what
+ * `openSession(chainId, headerJson, transactionJson)` resolves to: an object with the wasm
+ * session's methods (tx_hash, block_number, set_placeholders, add_reads, add_class,
+ * add_undeclared_class, execute, set_storage_proofs, run_os, prove), each taking the same
+ * arguments and returning, or resolving to, what the wasm method returns (a string, a number for
+ * block_number, nothing for the setters) and throwing, or rejecting, on an error. Every call is
+ * awaited, and a call may start before the last one resolved (classes are added in parallel).
+ * set_storage_proofs may resolve to null instead of the input's JSON (the native session keeps
+ * it): `osInputJson` is then null.
  */
 export async function buildOsInput({
   TxSession,
+  openSession = async (chainId, headerJson, transactionJson) => new TxSession(chainId, headerJson, transactionJson),
   rpc,
   chainId,
   transaction,
@@ -59,10 +70,11 @@ export async function buildOsInput({
     pinned ? fetchReads(pinned, first) : undefined,
   ]);
   const block_id = { block_number: header.block_number };
-  const session = new TxSession(chainId, JSON.stringify(header), JSON.stringify(transaction));
-  if (placeholders) session.set_placeholders(true);
-  log(`block ${header.block_number}, tx ${session.tx_hash()}`);
-  onTransaction({ block: header.block_number, tx_hash: session.tx_hash() });
+  const session = await openSession(chainId, JSON.stringify(header), JSON.stringify(transaction));
+  if (placeholders) await session.set_placeholders(true);
+  const tx_hash = await session.tx_hash();
+  log(`block ${header.block_number}, tx ${tx_hash}`);
+  onTransaction({ block: header.block_number, tx_hash });
 
   const addedClasses = new Set();
   const addClass = async (classHash) => {
@@ -75,15 +87,15 @@ export async function buildOsInput({
         rpc("starknet_getClass", { block_id, class_hash: classHash }),
       ]);
     } catch (error) {
-      if (error.code === 28) return session.add_undeclared_class(classHash); // CLASS_HASH_NOT_FOUND
+      if (error.code === 28) return await session.add_undeclared_class(classHash); // CLASS_HASH_NOT_FOUND
       throw error;
     }
     if (!sierra.sierra_program) throw new Error(`class ${classHash} is Cairo 0, not supported`);
     // Only the first three felts are read: the Sierra version.
-    session.add_class(classHash, JSON.stringify(casm), JSON.stringify(sierra.sierra_program.slice(0, 3)));
+    await session.add_class(classHash, JSON.stringify(casm), JSON.stringify(sierra.sierra_program.slice(0, 3)));
   };
   const addReads = async (reads) => {
-    session.add_reads(JSON.stringify(reads));
+    await session.add_reads(JSON.stringify(reads));
     await Promise.all(reads.class_hashes.map((entry) => addClass(entry.class_hash)));
   };
 
@@ -101,18 +113,18 @@ export async function buildOsInput({
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     onPhase("execute");
-    const result = JSON.parse(session.execute());
+    const result = JSON.parse(await session.execute());
     if (!result.missing) {
       log(`executed in round ${round}; ${result.storage_proof_params.length} storage proof request(s)`);
       const proofs = await Promise.all(result.storage_proof_params.map((params) => rpc("starknet_getStorageProof", params)));
       log("building the virtual OS input from the storage proofs");
-      const osInputJson = session.set_storage_proofs(JSON.stringify(proofs));
+      const osInputJson = (await session.set_storage_proofs(JSON.stringify(proofs))) ?? null;
       return { session, osInputJson, storageProofParams: result.storage_proof_params, rounds: round };
     }
     const { storage, nonces, class_hashes, classes } = result.missing;
     log(`round ${round} missed ${storage.length} storage, ${nonces.length} nonces, ${class_hashes.length} class hashes, ${classes.length} classes`);
     const reads = await fetchReads(block_id, { storage, nonces, class_hashes });
-    session.add_reads(JSON.stringify(reads));
+    await session.add_reads(JSON.stringify(reads));
     await Promise.all([...classes, ...reads.class_hashes.map((entry) => entry.class_hash)].map(addClass));
   }
   throw new Error(`execution still missing reads after ${MAX_ROUNDS} rounds`);

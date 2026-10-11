@@ -116,58 +116,65 @@ impl Drop for StopOnDrop<'_> {
     }
 }
 
-fn run_pipeline(capture: &Path, progress: &(dyn Fn(Progress<'_>) + Sync)) -> Report {
-    let note = |message: &str| progress(Progress::Note { message });
-    progress(Progress::Phase { phase: Phase::State });
-    let recorded: Vec<Value> = std::fs::read_to_string(capture.join("rpc-log.jsonl"))
-        .expect("rpc-log.jsonl")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("log line"))
-        .collect();
-    let lookup = |method: &str, matches: &dyn Fn(&Value) -> bool| -> Value {
-        recorded
+/// A capture made by rpc-record-proxy.py: its recorded RPC answers, the prove request and the
+/// native prover's response. Each method panics on what the recording doesn't hold.
+pub struct Recording {
+    dir: PathBuf,
+    recorded: Vec<Value>,
+}
+
+impl Recording {
+    pub fn open(capture: &Path) -> Recording {
+        let recorded = std::fs::read_to_string(capture.join("rpc-log.jsonl"))
+            .expect("rpc-log.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("log line"))
+            .collect();
+        Recording { dir: capture.to_path_buf(), recorded }
+    }
+
+    /// The result of the first recorded `method` call whose params match.
+    pub fn lookup(&self, method: &str, matches: &dyn Fn(&Value) -> bool) -> Value {
+        self.recorded
             .iter()
             .find(|entry| entry["request"]["method"] == method && matches(&entry["request"]["params"]))
             .map(|entry| entry["response"]["result"].clone())
             .unwrap_or_else(|| panic!("not in the recording: {method}"))
-    };
-    let transaction = read_json(&first_file(capture, "request-"))["params"]["transaction"].clone();
-
-    let started = Instant::now();
-    let header = lookup("starknet_getBlockWithTxHashes", &|_| true);
-    let mut session =
-        TxSession::new("SN_SEPOLIA", &header.to_string(), &transaction.to_string()).expect("session");
-    progress(Progress::Transaction { block: session.block_number(), tx_hash: &session.tx_hash() });
-    let simulation = lookup("starknet_simulateTransactions", &|_| true);
-    let initial_reads = &simulation["initial_reads"];
-    session.add_reads(&initial_reads.to_string()).expect("reads");
-
-    let add_class = |session: &mut TxSession, class_hash: &Value| {
-        let casm = read_json(&capture.join(format!("casm-{}.json", class_hash.as_str().unwrap())));
-        let sierra = lookup("starknet_getClass", &|params| felt(&params["class_hash"]) == felt(class_hash));
-        let head = Value::Array(sierra["sierra_program"].as_array().expect("sierra")[..3].to_vec());
-        session
-            .add_class(class_hash.as_str().unwrap(), &casm["result"].to_string(), &head.to_string())
-            .expect("class");
-    };
-    for entry in initial_reads["class_hashes"].as_array().expect("class hashes") {
-        add_class(&mut session, &entry["class_hash"]);
     }
 
-    progress(Progress::Phase { phase: Phase::Execute });
-    let mut rounds = 0;
-    let proof_params = loop {
-        rounds += 1;
-        let result: Value = serde_json::from_str(&session.execute().expect("execute")).unwrap();
-        let Some(missing) = result.get("missing") else {
-            break result["storage_proof_params"].clone();
-        };
+    /// The transaction of the prove request.
+    pub fn transaction(&self) -> Value {
+        read_json(&first_file(&self.dir, "request-"))["params"]["transaction"].clone()
+    }
+
+    /// The block header (`starknet_getBlockWithTxHashes`).
+    pub fn header(&self) -> Value {
+        self.lookup("starknet_getBlockWithTxHashes", &|_| true)
+    }
+
+    /// The simulation's `initial_reads`.
+    pub fn initial_reads(&self) -> Value {
+        self.lookup("starknet_simulateTransactions", &|_| true)["initial_reads"].clone()
+    }
+
+    /// `add_class`'s CASM JSON and Sierra program head JSON for `class_hash`.
+    pub fn class(&self, class_hash: &Value) -> (String, String) {
+        let casm = read_json(&self.dir.join(format!("casm-{}.json", class_hash.as_str().unwrap())));
+        let sierra =
+            self.lookup("starknet_getClass", &|params| felt(&params["class_hash"]) == felt(class_hash));
+        let head = Value::Array(sierra["sierra_program"].as_array().expect("sierra")[..3].to_vec());
+        (casm["result"].to_string(), head.to_string())
+    }
+
+    /// The reads that `execute` reported missing, in `add_reads`' format, and how many there are.
+    /// Only storage misses are recorded (the simulation prefetched the rest).
+    pub fn missing_reads(&self, missing: &Value) -> (String, usize) {
         let storage: Vec<Value> = missing["storage"]
             .as_array()
             .unwrap()
             .iter()
             .map(|pair| {
-                let value = lookup("starknet_getStorageAt", &|params| {
+                let value = self.lookup("starknet_getStorageAt", &|params| {
                     felt(&params["contract_address"]) == felt(&pair[0]) && felt(&params["key"]) == felt(&pair[1])
                 });
                 json!({ "contract_address": pair[0], "key": pair[1], "value": value })
@@ -179,16 +186,62 @@ fn run_pipeline(capture: &Path, progress: &(dyn Fn(Progress<'_>) + Sync)) -> Rep
                 && missing["classes"].as_array().unwrap().is_empty(),
             "only storage misses are replayed: {missing}"
         );
-        note(&format!("round {rounds} missed {} storage", storage.len()));
-        session.add_reads(&json!({ "storage": storage }).to_string()).expect("reads");
+        (json!({ "storage": storage }).to_string(), storage.len())
+    }
+
+    /// The `starknet_getStorageProof` results for `execute`'s `storage_proof_params`, as JSON.
+    pub fn storage_proofs(&self, proof_params: &Value) -> String {
+        let proofs: Vec<Value> = proof_params
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|_| self.lookup("starknet_getStorageProof", &|_| true))
+            .collect();
+        Value::Array(proofs).to_string()
+    }
+
+    /// The native prover's `starknet_proveTransaction` result.
+    pub fn native_result(&self) -> Value {
+        read_json(&first_file(&self.dir, "response-"))["result"].clone()
+    }
+}
+
+/// Proof and proof_facts of a prove result equal to the native prover's.
+pub fn identical(result: &Value, native: &Value) -> bool {
+    result["proof"] == native["proof"] && result["proof_facts"] == native["proof_facts"]
+}
+
+fn run_pipeline(capture: &Path, progress: &(dyn Fn(Progress<'_>) + Sync)) -> Report {
+    let note = |message: &str| progress(Progress::Note { message });
+    progress(Progress::Phase { phase: Phase::State });
+    let recording = Recording::open(capture);
+    let transaction = recording.transaction();
+
+    let started = Instant::now();
+    let header = recording.header();
+    let mut session =
+        TxSession::new("SN_SEPOLIA", &header.to_string(), &transaction.to_string()).expect("session");
+    progress(Progress::Transaction { block: session.block_number(), tx_hash: &session.tx_hash() });
+    let initial_reads = recording.initial_reads();
+    session.add_reads(&initial_reads.to_string()).expect("reads");
+    for entry in initial_reads["class_hashes"].as_array().expect("class hashes") {
+        let (casm, head) = recording.class(&entry["class_hash"]);
+        session.add_class(entry["class_hash"].as_str().unwrap(), &casm, &head).expect("class");
+    }
+
+    progress(Progress::Phase { phase: Phase::Execute });
+    let mut rounds = 0;
+    let proof_params = loop {
+        rounds += 1;
+        let result: Value = serde_json::from_str(&session.execute().expect("execute")).unwrap();
+        let Some(missing) = result.get("missing") else {
+            break result["storage_proof_params"].clone();
+        };
+        let (reads, count) = recording.missing_reads(missing);
+        note(&format!("round {rounds} missed {count} storage"));
+        session.add_reads(&reads).expect("reads");
     };
-    let proofs: Vec<Value> = proof_params
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|_| lookup("starknet_getStorageProof", &|_| true))
-        .collect();
-    session.set_storage_proofs(&Value::Array(proofs).to_string()).expect("storage proofs");
+    session.set_storage_proofs(&recording.storage_proofs(&proof_params)).expect("storage proofs");
     let input_s = started.elapsed().as_secs_f64();
 
     progress(Progress::Phase { phase: Phase::Os });
@@ -210,7 +263,7 @@ fn run_pipeline(capture: &Path, progress: &(dyn Fn(Progress<'_>) + Sync)) -> Rep
     let verify_s = verify_started.elapsed().as_secs_f64();
 
     let result: Value = serde_json::from_str(&result_json).unwrap();
-    let native = read_json(&first_file(capture, "response-"))["result"].clone();
+    let native = recording.native_result();
     let proof_base64 = result["proof"].as_str().expect("proof");
     let padding = proof_base64.bytes().rev().take_while(|&byte| byte == b'=').count();
     Report {
@@ -227,7 +280,7 @@ fn run_pipeline(capture: &Path, progress: &(dyn Fn(Progress<'_>) + Sync)) -> Rep
         pie,
         verified: verdict.is_ok(),
         verify_error: verdict.err(),
-        identical: result["proof"] == native["proof"] && result["proof_facts"] == native["proof_facts"],
+        identical: identical(&result, &native),
         proof_bytes: proof_base64.len() / 4 * 3 - padding,
         peak: peak_memory(),
         result_json,
@@ -293,10 +346,10 @@ pub unsafe extern "C" fn tx_prove_replay(
     CString::new(answer).expect("no NUL in JSON").into_raw()
 }
 
-/// Frees a string returned by [`tx_prove_replay`].
+/// Frees a string returned by [`tx_prove_replay`] or by the session functions (`native`).
 ///
 /// # Safety
-/// `answer` must come from [`tx_prove_replay`] and not be freed before.
+/// `answer` must come from this library and not be freed before.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tx_prove_free(answer: *mut c_char) {
     if !answer.is_null() {
