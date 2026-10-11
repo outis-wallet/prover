@@ -41,7 +41,8 @@ function compareProofParams(recordedParams, ours) {
 }
 
 const started = Date.now();
-const { session, osInputJson } = await buildOsInput({ TxSession, rpc, chainId: "SN_SEPOLIA", transaction, log: console.log });
+// The recording was made by a prover that prefetches with a simulation, so it is replayed that way.
+const { session, osInputJson } = await buildOsInput({ TxSession, rpc, chainId: "SN_SEPOLIA", transaction, simulate: true, placeholders: false, log: console.log });
 const built = Date.now();
 memory("input built");
 fs.writeFileSync(path.join(out, "virtual-os-input.wasm.json"), osInputJson);

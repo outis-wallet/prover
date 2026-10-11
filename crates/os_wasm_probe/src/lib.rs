@@ -323,6 +323,7 @@ pub struct TxSession {
     os_input: Option<VirtualOsBlockInput>,
     l2_to_l1_messages: Vec<MessageToL1>,
     pie: Option<CairoPie>,
+    placeholders: bool,
 }
 
 #[wasm_bindgen]
@@ -381,6 +382,7 @@ impl TxSession {
             os_input: None,
             l2_to_l1_messages: Vec::new(),
             pie: None,
+            placeholders: false,
         })
     }
 
@@ -432,6 +434,12 @@ impl TxSession {
         Ok(())
     }
 
+    /// With `on`, `execute` reads a missing storage value or nonce as zero and carries on, so one
+    /// run reports more of what is missing (see `PrefetchedState::placeholders`).
+    pub fn set_placeholders(&mut self, on: bool) {
+        self.placeholders = on;
+    }
+
     /// Executes the transaction. Returns `{"missing": ...}` when a read was not prefetched
     /// (fetch it, add it, call again), else `{"storage_proof_params": [...]}`: the
     /// `starknet_getStorageProof` requests to make.
@@ -441,6 +449,7 @@ impl TxSession {
             classes: Arc::new(self.classes.clone()),
             undeclared_classes: Arc::new(self.undeclared_classes.clone()),
             missing: Arc::new(Mutex::new(Default::default())),
+            placeholders: self.placeholders,
         };
         let base_block_info = BaseBlockInfo::new(self.header.clone(), self.chain_info.clone())
             .map_err(|e| fail(&e))?;

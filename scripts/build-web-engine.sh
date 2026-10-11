@@ -5,6 +5,7 @@
 #
 # Usage: scripts/build-web-engine.sh <out dir>, e.g. outis/wallet/apps/prover/public
 # (needs python3 and gzip). Only engine/, pkg-mt/ and captures/ are replaced in the out dir.
+# CAPTURES=0 leaves the captures out: a wallet proves its own transactions (the worker's live mode).
 # Pages served with it need COOP: same-origin and COEP: require-corp (threads need shared memory).
 set -e
 [ -n "$1" ] || { echo "usage: scripts/build-web-engine.sh <out dir>" >&2; exit 1; }
@@ -14,7 +15,7 @@ cd "$(dirname "$0")/.."
 PKG=pkg-mt
 [ -f "$PKG/os_wasm_probe_bg.wasm" ] || { echo "No $PKG/: run scripts/build-wasm.sh web first." >&2; exit 1; }
 rm -rf "$OUT/engine" "$OUT/pkg-mt" "$OUT/captures"
-mkdir -p "$OUT/engine" "$OUT/pkg-mt" "$OUT/captures/classes"
+mkdir -p "$OUT/engine" "$OUT/pkg-mt"
 
 # The wasm module: no name section (debug symbols), gzipped, named by its hash so it can be cached
 # forever.
@@ -55,7 +56,10 @@ rm -f "$OUT"/pkg-mt/snippets/*/src/workerHelpers.js.bak
 sed "s|__WASM_FILE__|$wasm_file|" js/worker.mjs > "$OUT/engine/worker.mjs"
 cp js/tx-driver.mjs "$OUT/engine/"
 
+[ "${CAPTURES:-1}" = 0 ] && { du -sh "$OUT/pkg-mt/$wasm_file"; exit 0; }
+
 # The captures (already trimmed to what the replay reads), with fixed names, and the classes once.
+mkdir -p "$OUT/captures/classes"
 for capture in captures/*/; do
   action=$(basename "$capture")
   [ "$action" = classes ] && continue

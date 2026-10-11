@@ -1,5 +1,6 @@
-//! A state reader over state fetched ahead of time. A read it cannot answer fails and is recorded,
-//! so the caller can fetch it and execute again.
+//! A state reader over state fetched ahead of time. A read it cannot answer is recorded, so the
+//! caller can fetch it and execute again. It fails, or, with `placeholders`, a storage value or a
+//! nonce reads as zero and the run carries on, so that one run finds more of what is missing.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
@@ -41,6 +42,9 @@ pub struct PrefetchedState {
     /// Classes the node reported as not declared.
     pub undeclared_classes: Arc<BTreeSet<ClassHash>>,
     pub missing: Arc<Mutex<MissingReads>>,
+    /// Missing storage values and nonces read as zero instead of failing the run. Such a run only
+    /// finds reads: its result is thrown away while anything is missing.
+    pub placeholders: bool,
 }
 
 impl PrefetchedState {
@@ -58,6 +62,10 @@ impl StateReader for PrefetchedState {
     ) -> StateResult<Felt> {
         match self.maps.storage.get(&(contract_address, key)) {
             Some(value) => Ok(*value),
+            None if self.placeholders => {
+                self.missing.lock().expect("missing reads lock").storage.insert((contract_address, key));
+                Ok(Felt::ZERO)
+            }
             None => Err(self.miss(
                 |missing| {
                     missing.storage.insert((contract_address, key));
@@ -70,6 +78,10 @@ impl StateReader for PrefetchedState {
     fn get_nonce_at(&self, contract_address: ContractAddress) -> StateResult<Nonce> {
         match self.maps.nonces.get(&contract_address) {
             Some(value) => Ok(*value),
+            None if self.placeholders => {
+                self.missing.lock().expect("missing reads lock").nonces.insert(contract_address);
+                Ok(Nonce::default())
+            }
             None => Err(self.miss(
                 |missing| {
                     missing.nonces.insert(contract_address);
