@@ -62,6 +62,9 @@ fn main() {
         ),
         _ => panic!("{usage}"),
     }
+    // No GPU work in the background while the process exits.
+    #[cfg(feature = "gpu")]
+    os_wasm_probe::gpu::shutdown();
 }
 
 fn replay(capture: &Path, out: Option<&Path>) {

@@ -87,9 +87,19 @@ pub fn env_enabled() -> bool {
         .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
 }
 
+/// Stops the committer's keep-warm thread, if there is a committer: no more GPU work in the
+/// background. Call it before the process exits: the driver torn down under a keep-warm submission
+/// crashed os_native_probe at exit. Commitments still work after it, without keep-warm.
+pub fn shutdown() {
+    if let Some(Ok(committer)) = COMMITTER.get() {
+        committer.shutdown();
+    }
+}
+
 fn apply(enabled: bool) -> Result<Option<String>, String> {
     if !enabled {
         set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(None);
+        shutdown();
         tracing::info!("GPU commitment off");
         return Ok(None);
     }
