@@ -115,8 +115,10 @@ fn replay(capture: &Path, out: Option<&Path>) {
             if stats.trees > 0 {
                 println!(
                     "proof {round}: decommitment on the GPU: {} trees of {} ({} not resident, {} failed), \
-                     {} columns, {} values, {:.3} s; shadow {compared} columns compared, {different} values differ",
+                     {} columns, {} values, {:.3} s (plan {:.3}, setup {:.3}, GPU {:.3}, finish {:.3}); \
+                     shadow {compared} columns compared, {different} values differ",
                     stats.served, stats.trees, stats.not_resident, stats.failed, stats.columns, stats.positions, stats.seconds,
+                    stats.times.plan, stats.times.setup, stats.times.gpu, stats.times.finish,
                 );
             }
         }
@@ -125,8 +127,10 @@ fn replay(capture: &Path, out: Option<&Path>) {
             if stats.calls > 0 {
                 println!(
                     "proof {round}: out-of-domain samples on the GPU: {} columns of {} ({} not resident, {} failed), \
-                     {} samplings, {} groups, {:.3} s; shadow {compared} samples compared, {different} samples differ",
+                     {} samplings, {} groups, {:.3} s (plan {:.3}, setup {:.3}, GPU {:.3}, finish {:.3}); \
+                     shadow {compared} samples compared, {different} samples differ",
                     stats.served, stats.columns, stats.not_resident, stats.failed, stats.calls, stats.groups, stats.seconds,
+                    stats.times.plan, stats.times.setup, stats.times.gpu, stats.times.finish,
                 );
             }
         }
