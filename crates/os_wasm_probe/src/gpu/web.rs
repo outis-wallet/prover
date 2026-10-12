@@ -51,6 +51,10 @@ static REPORT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static DEADLINE_MS: AtomicU64 = AtomicU64::new(0);
 /// `gpu_enable`'s default deadline: a commitment takes under a second on a desktop GPU.
 const DEFAULT_DEADLINE_MS: f64 = 60_000.0;
+/// When the hook was enabled, and when the last commitment the GPU made ended (ms, f64 bits; 0:
+/// none yet): the report's `at_ms` and `idle_ms` (how long the GPU sat idle before each).
+static ENABLED_AT: AtomicU64 = AtomicU64::new(0);
+static LAST_GPU_END: AtomicU64 = AtomicU64::new(0);
 
 /// The bridge's job table in this module's memory, its header written: what the GPU worker
 /// attaches to, with the memory.
@@ -67,6 +71,8 @@ pub fn gpu_bridge_region() -> u32 {
 pub fn gpu_enable(deadline_ms: f64) {
     let deadline_ms = if deadline_ms > 0.0 { deadline_ms } else { DEFAULT_DEADLINE_MS };
     DEADLINE_MS.store(deadline_ms.to_bits(), Ordering::Relaxed);
+    ENABLED_AT.store(now().to_bits(), Ordering::Relaxed);
+    LAST_GPU_END.store(0, Ordering::Relaxed);
     set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(Arc::new(commit)));
 }
 
@@ -110,10 +116,16 @@ fn commit(
     lifting_log_size: u32,
 ) -> Result<Tree, Polys> {
     let started = now();
+    let enabled_at = f64::from_bits(ENABLED_AT.load(Ordering::Relaxed));
+    let last_end = f64::from_bits(LAST_GPU_END.load(Ordering::Relaxed));
+    // Since the hook was enabled (the proof's attach), and since the last commitment the GPU
+    // made ended (or the attach): the GPU's idle time before this one.
+    let (at_ms, idle_ms) =
+        (started - enabled_at, started - if last_end > 0.0 { last_end } else { enabled_at });
     let log_sizes: Vec<u32> = polys.iter().map(|poly| poly.log_size()).collect();
     let shape = format!(
         "\"columns\":{},\"max_log_size\":{},\"log_blowup\":{log_blowup},\"lifting_log_size\":\
-         {lifting_log_size},\"coeffs_mib\":{:.1}",
+         {lifting_log_size},\"coeffs_mib\":{:.1},\"at_ms\":{at_ms:.0},\"idle_ms\":{idle_ms:.0}",
         log_sizes.len(),
         log_sizes.iter().max().unwrap_or(&0),
         log_sizes.iter().map(|&l| 4u64 << l).sum::<u64>() as f64 / (1 << 20) as f64,
@@ -222,7 +234,9 @@ fn commit(
     // The GPU worker's times (see the bridge's `commit::ST_*`): the upload, the compute and the
     // readback overlap (commit_ms is the whole of them), so each is that side's own work; in the
     // worker's serial mode (serial: 1) each phase is waited for, and is its time alone. The GPU's
-    // own time (gpu_*) when the worker times it (its timestamps option), 0 otherwise.
+    // own time (gpu_*) when the worker times it (its timestamps option), 0 otherwise. Keep-warm
+    // (the worker's keep_warm_ms option) when the commitment began: warm 0 off, 1 warming, 2 on
+    // but its window had ended; warm_dispatches since the previous commitment (or the attach).
     let mib = |k: usize| stat(k) / (1 << 20) as f64;
     record(format!(
         "{{{shape},\"ran\":\"gpu\",\"hook_ms\":{:.1},\"alloc_ms\":{:.1},\"wait_ms\":{:.1},\
@@ -232,7 +246,8 @@ fn commit(
          \"readback_wait_ms\":{:.1},\"tail_ms\":{:.1},\"destroy_ms\":{:.1},\"streamed\":{},\
          \"groups\":{},\"serial\":{},\"upload_mib\":{:.1},\"readback_mib\":{:.1},\"gpu_mib\":{:.1},\
          \"held_mib\":{:.1},\"worker_ms\":{:.1},\"gpu_upload_ms\":{:.1},\"gpu_compute_ms\":{:.1},\
-         \"gpu_readback_ms\":{:.1},\"gpu_busy_ms\":{:.1},\"gpu_span_ms\":{:.1}}}",
+         \"gpu_readback_ms\":{:.1},\"gpu_busy_ms\":{:.1},\"gpu_span_ms\":{:.1},\"warm\":{},\
+         \"warm_dispatches\":{}}}",
         now() - started,
         allocated - started,
         completion.returned - allocated,
@@ -264,7 +279,10 @@ fn commit(
         stat(d::ST_GPU_READBACK),
         stat(d::ST_GPU_BUSY),
         stat(d::ST_GPU_SPAN),
+        stat(d::ST_WARM) as u32,
+        stat(d::ST_WARM_DISPATCHES) as u64,
     ));
+    LAST_GPU_END.store(now().to_bits(), Ordering::Relaxed);
     Ok(tree)
 }
 

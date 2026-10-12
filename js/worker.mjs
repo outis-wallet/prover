@@ -102,6 +102,15 @@ function gpuCommitments() {
   }
 }
 
+/**
+ * Tells the GPU worker the proof starts proving, just before the long synchronous call: its
+ * keep-warm (the page's keep_warm_ms, off by default) then keeps the GPU's clocks up for the first
+ * commitment. Nothing without a GPU worker.
+ */
+function gpuProofStarts() {
+  if (gpuPort) gpuPort.postMessage({ warm: true });
+}
+
 /** Detaches the GPU worker (before the threads stop); returns the commitments it served. */
 async function detachGpu() {
   if (!gpuPort) return null;
@@ -111,7 +120,8 @@ async function detachGpu() {
   // No job is running (the proof is over), so the reply is immediate unless the worker is gone.
   const reply = await request(port, { detach: true }, 10000, { lost: true });
   port.close();
-  return { lost: !!reply.lost, commitments: gpuCommitments() };
+  // warm: keep-warm's window (0: off) and its dispatches so far in the worker's life.
+  return { lost: !!reply.lost, warm: reply.warm, commitments: gpuCommitments() };
 }
 
 // The page's memory figure. This worker is inside long synchronous calls (the OS run, the proof),
@@ -198,6 +208,7 @@ async function proveLive({ transaction, chainId, blockNumber, first }, threads, 
 
   event({ event: "phase", phase: "prove" });
   phaseStarted = performance.now();
+  gpuProofStarts();
   const resultJson = session.prove();
   const proveS = since(phaseStarted);
 
@@ -301,6 +312,7 @@ self.onmessage = async ({ data: { action, live, threads, memoryPort, rpcPort, gp
 
     event({ event: "phase", phase: "prove" });
     phaseStarted = performance.now();
+    gpuProofStarts();
     const resultJson = session.prove();
     const proveS = since(phaseStarted);
     const memoryParts = pkg.memory_report().match(/wasm (\d+) live (\d+) peak (\d+)/) || [];
