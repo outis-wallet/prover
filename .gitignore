@@ -3,5 +3,6 @@ target-wasm/
 target-wasm-mt/
 js/node/
 pkg-mt/
+pkg-mt-gpu/
 replay-out/
 .venv/

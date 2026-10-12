@@ -7,14 +7,19 @@
 # (needs python3 and gzip). Only engine/, pkg-mt/ and captures/ are replaced in the out dir.
 # CAPTURES=0 leaves the captures out: a wallet proves its own transactions (the worker's live mode).
 # Pages served with it need COOP: same-origin and COEP: require-corp (threads need shared memory).
+#
+# The GPU commitment: PKG=pkg-mt-gpu (scripts/build-wasm.sh web-gpu) takes the build with feature
+# gpu, and GPU_WEB=<proving>/crates/stwo_gpu_spike/web (built with its ./build.sh gpu) adds the
+# page's GPU worker, as gpu/ (gpu.worker.mjs and its module); the page starts it with
+# engine/gpu.mjs.
 set -e
 [ -n "$1" ] || { echo "usage: scripts/build-web-engine.sh <out dir>" >&2; exit 1; }
 mkdir -p "$1"
 OUT=$(cd "$1" && pwd)
 cd "$(dirname "$0")/.."
-PKG=pkg-mt
+PKG=${PKG:-pkg-mt}
 [ -f "$PKG/os_wasm_probe_bg.wasm" ] || { echo "No $PKG/: run scripts/build-wasm.sh web first." >&2; exit 1; }
-rm -rf "$OUT/engine" "$OUT/pkg-mt" "$OUT/captures"
+rm -rf "$OUT/engine" "$OUT/pkg-mt" "$OUT/captures" "$OUT/gpu"
 mkdir -p "$OUT/engine" "$OUT/pkg-mt"
 
 # The wasm module: no name section (debug symbols), gzipped, named by its hash so it can be cached
@@ -54,7 +59,16 @@ rm -f "$OUT"/pkg-mt/snippets/*/src/workerHelpers.js.bak
 
 # The engine.
 sed "s|__WASM_FILE__|$wasm_file|" js/worker.mjs > "$OUT/engine/worker.mjs"
-cp js/tx-driver.mjs "$OUT/engine/"
+cp js/tx-driver.mjs js/gpu.mjs "$OUT/engine/"
+
+# The GPU worker, in the layout its script imports its module from (pkg/gpu/).
+if [ -n "$GPU_WEB" ]; then
+  [ -f "$GPU_WEB/pkg/gpu/stwo_gpu_web_worker_bg.wasm" ] || { echo "No $GPU_WEB/pkg/gpu/: run its build.sh gpu first." >&2; exit 1; }
+  mkdir -p "$OUT/gpu/pkg"
+  cp "$GPU_WEB/gpu.worker.mjs" "$OUT/gpu/"
+  cp -r "$GPU_WEB/pkg/gpu" "$OUT/gpu/pkg/"
+  rm -f "$OUT"/gpu/pkg/gpu/*.d.ts "$OUT"/gpu/pkg/gpu/package.json
+fi
 
 [ "${CAPTURES:-1}" = 0 ] && { du -sh "$OUT/pkg-mt/$wasm_file"; exit 0; }
 
