@@ -121,6 +121,16 @@ fn replay(capture: &Path, out: Option<&Path>) {
             }
         }
         #[cfg(feature = "gpu")]
+        if let Some((stats, (compared, different))) = os_wasm_probe::gpu::take_ood_stats() {
+            if stats.calls > 0 {
+                println!(
+                    "proof {round}: out-of-domain samples on the GPU: {} columns of {} ({} not resident, {} failed), \
+                     {} samplings, {} groups, {:.3} s; shadow {compared} samples compared, {different} samples differ",
+                    stats.served, stats.columns, stats.not_resident, stats.failed, stats.calls, stats.groups, stats.seconds,
+                );
+            }
+        }
+        #[cfg(feature = "gpu")]
         if let Some((stats, (ready, compiling, failed))) = os_wasm_probe::gpu::take_composition_stats() {
             println!(
                 "proof {round}: {}; kernels ready {ready}, compiling {compiling}, failed {failed}",

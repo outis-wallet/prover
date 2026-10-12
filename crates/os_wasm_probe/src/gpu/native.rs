@@ -35,7 +35,10 @@ use stwo::prover::poly::circle::{part_domain, PolyOps};
 use stwo::core::fields::m31::BaseField;
 use stwo::prover::poly::BitReversedOrder;
 use stwo::prover::poly::circle::CircleEvaluation;
-use stwo::prover::{set_striped_commit_hook, set_striped_decommit_hook, Poly, StripedCommitHook};
+use stwo::prover::{
+    set_ood_sample_hook, set_striped_commit_hook, set_striped_decommit_hook, OodSampleGroup, Poly,
+    StripedCommitHook,
+};
 use stwo_constraint_framework::{set_trace_part_hook, TracePartHook, TracePartRequest};
 use stwo_constraint_framework::constraint_hook::set_constraint_eval_hook;
 use stwo_gpu_spike::committer::{Declined, GpuCommitter};
@@ -305,6 +308,7 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
     if mode == Decommit::Off {
         set_striped_decommit_hook::<SimdBackend>(None);
         committer.set_decommit(false);
+        apply_ood(committer);
         return;
     }
     // The coefficients the decommitments read (composition's mode, or set here).
@@ -314,6 +318,8 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
     committer.set_decommit(true);
     // Tests of the proof's checks: `1` changes the first opened value of every decommitment,
     // `call:N` every opened value of the N-th one (from 1, counted over the process).
+    // The out-of-domain samples read the coefficients kept for the decommitment.
+    apply_ood(committer);
     let tamper = std::env::var("OUTIS_GPU_DECOMMIT_TAMPER").ok();
     let tamper_call = tamper.as_deref().and_then(|v| v.strip_prefix("call:")?.parse::<usize>().ok());
     let tamper_first = tamper.as_deref() == Some("1");
@@ -349,6 +355,120 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
                     values.iter_mut().flatten().for_each(bump);
                 }
                 Some(values)
+            }
+        }
+    })));
+}
+
+/// The out-of-domain samples on the GPU (stwo's out-of-domain sample hook, see stwo-gpu-spike's
+/// `ood`). They read the coefficients kept until the decommitment: only with the decommitment on
+/// the GPU (or in its shadow mode).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ood {
+    Off,
+    /// The samples of the columns kept as coefficients are evaluated on the GPU.
+    On,
+    /// Evaluated on the GPU and on the CPU, compared; the CPU's values are used.
+    Shadow,
+}
+
+/// The out-of-domain sample mode [`set_ood`] set (`None` until called: the environment's).
+static OOD: Mutex<Option<Ood>> = Mutex::new(None);
+/// Shadow mode's counts: (values compared, values that differ).
+static OOD_SHADOW: Mutex<(u64, u64)> = Mutex::new((0, 0));
+/// The sample hook's calls so far (for `OUTIS_GPU_OOD_TAMPER=call:N`).
+static OOD_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// The out-of-domain sample mode: [`set_ood`]'s, else `OUTIS_GPU_OOD` (`1`, `on`, `true`;
+/// `shadow`), else off.
+pub fn ood() -> Ood {
+    if let Some(mode) = *OOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+        return mode;
+    }
+    match std::env::var("OUTIS_GPU_OOD").unwrap_or_default().to_ascii_lowercase().as_str() {
+        "1" | "on" | "true" => Ood::On,
+        "shadow" => Ood::Shadow,
+        _ => Ood::Off,
+    }
+}
+
+/// Sets the out-of-domain sample mode for the proofs from now on (off by default), with the GPU
+/// and its decommitment on. Takes effect now if the GPU is on, otherwise when it is turned on.
+pub fn set_ood(mode: Ood) {
+    *OOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(mode);
+    let gpu_on = *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let (true, Some(Ok(committer))) = (gpu_on, COMMITTER.get()) {
+        apply_ood(committer);
+    }
+    tracing::info!("GPU out-of-domain samples: {mode:?}");
+}
+
+/// The out-of-domain samples' counts since the last call, and shadow mode's (values compared,
+/// values that differ).
+pub fn take_ood_stats() -> Option<(stwo_gpu_spike::committer::OodStats, (u64, u64))> {
+    let Some(Ok(committer)) = COMMITTER.get() else { return None };
+    let shadow = std::mem::take(&mut *OOD_SHADOW.lock().unwrap_or_else(|p| p.into_inner()));
+    Some((committer.take_ood_stats(), shadow))
+}
+
+/// The CPU's value of a group's column (as stwo's out-of-domain sampling computes it).
+fn cpu_ood_value(
+    group: &OodSampleGroup<'_, SimdBackend>,
+    column: &CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>,
+) -> stwo::core::fields::qm31::SecureField {
+    let log_blowup = column.domain.log_size() - stwo::prover::backend::Column::len(&column.values).ilog2();
+    SimdBackend::subdomain_eval_group(
+        CanonicCoset::new(group.log_size),
+        log_blowup,
+        group.point,
+        &[column],
+    )[0]
+}
+
+/// Registers (or removes) the out-of-domain sample hook as [`ood`] and [`decommit`] say, on
+/// `committer`.
+fn apply_ood(committer: &Arc<GpuCommitter>) {
+    let mode = ood();
+    if mode == Ood::Off || decommit() == Decommit::Off {
+        set_ood_sample_hook::<SimdBackend>(None);
+        return;
+    }
+    // Tests of the proof's checks: every value the N-th sampling (from 1, counted over the
+    // process) answers on the GPU changed.
+    let tamper_call = std::env::var("OUTIS_GPU_OOD_TAMPER")
+        .ok()
+        .and_then(|v| v.strip_prefix("call:")?.parse::<usize>().ok());
+    let committer = committer.clone();
+    set_ood_sample_hook::<SimdBackend>(Some(Arc::new(move |groups| {
+        let call = OOD_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut answers = committer.ood_values(groups);
+        match mode {
+            Ood::Shadow => {
+                let (mut compared, mut different) = (0u64, 0u64);
+                for (group, answers) in groups.iter().zip(&answers) {
+                    for (column, answer) in group.columns.iter().zip(answers) {
+                        if let Some(value) = answer {
+                            compared += 1;
+                            if *value != cpu_ood_value(group, column) {
+                                different += 1;
+                            }
+                        }
+                    }
+                }
+                if different > 0 {
+                    tracing::warn!("out-of-domain shadow: {different} values differ");
+                }
+                let mut shadow = OOD_SHADOW.lock().unwrap_or_else(|p| p.into_inner());
+                shadow.0 += compared;
+                shadow.1 += different;
+                groups.iter().map(|group| vec![None; group.columns.len()]).collect()
+            }
+            _ => {
+                if tamper_call == Some(call) {
+                    let one = stwo::core::fields::qm31::SecureField::from(1u32);
+                    answers.iter_mut().flatten().flatten().for_each(|value| *value += one);
+                }
+                answers
             }
         }
     })));
@@ -403,6 +523,7 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
         set_trace_part_hook(None);
         set_constraint_eval_hook(None);
         set_striped_decommit_hook::<SimdBackend>(None);
+        set_ood_sample_hook::<SimdBackend>(None);
         shutdown();
         tracing::info!("GPU commitment off");
         return Ok(None);
@@ -444,6 +565,9 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
     if decommit() != Decommit::Off {
         apply_decommit(&committer);
     }
+    // The out-of-domain samples on the GPU only with a mode (`OUTIS_GPU_OOD`, `set_ood`) and the
+    // decommitment's.
+    apply_ood(&committer);
     set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(hook(committer)));
     tracing::info!("GPU commitment on: {adapter}");
     Ok(Some(adapter))
