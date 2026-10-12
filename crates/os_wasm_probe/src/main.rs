@@ -33,7 +33,7 @@ fn main() {
             .init();
     }
     let usage = "usage: os_native_probe os <input.json> | verify <response.json> | replay <capture dir> [out.json] \
-                 | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu]";
+                 | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu] [--keep-warm MS]";
     let option = |name: &str| {
         args.iter().position(|arg| arg == name).map(|index| args[index + 1].parse::<f64>().expect(name))
     };
@@ -59,6 +59,7 @@ fn main() {
             option("--threads").unwrap_or(0.0) as u32,
             option("--cancel-after").map(Duration::from_secs_f64),
             args.iter().any(|arg| arg == "--gpu"),
+            option("--keep-warm").map(|ms| ms as u32),
         ),
         _ => panic!("{usage}"),
     }
@@ -190,9 +191,19 @@ fn take(answer: *mut c_char) -> String {
     text
 }
 
-fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>, gpu: bool) {
+fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>, gpu: bool, keep_warm: Option<u32>) {
     // --gpu: the GPU through the C entry point, as an app turns it on. Without it, OUTIS_GPU=1
     // turns it on at the proof, as for an app that sets the environment.
+    // --keep-warm MS: keep-warm through its C entry point, before the GPU is on.
+    if let Some(milliseconds) = keep_warm {
+        #[cfg(feature = "gpu")]
+        println!(
+            "tx_prove_set_gpu_keep_warm({milliseconds}): {}",
+            take(os_wasm_probe::native::tx_prove_set_gpu_keep_warm(milliseconds))
+        );
+        #[cfg(not(feature = "gpu"))]
+        panic!("--keep-warm {milliseconds}: built without the gpu feature");
+    }
     if gpu {
         #[cfg(feature = "gpu")]
         println!("tx_prove_set_gpu(1): {}", take(os_wasm_probe::native::tx_prove_set_gpu(1)));

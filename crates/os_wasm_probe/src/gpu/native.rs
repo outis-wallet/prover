@@ -18,11 +18,15 @@
 //! `=0,3,...` (the hook's calls in this process, from 0) makes the hook decline those
 //! commitments without asking the GPU, to check the fallback.
 //!
+//! Keep-warm (the committer keeping the GPU's clocks up for a window after each commitment, see
+//! stwo-gpu-spike's `warm`): off by default, on with `STWO_GPU_KEEP_WARM_MS=<ms>` in the
+//! environment or [`set_keep_warm`] (the C entry point `tx_prove_set_gpu_keep_warm`).
+//!
 //! Each commitment is a tracing event (target `os_wasm_probe::gpu`): GPU or CPU, why, and how
 //! long; [`take_commitments`] returns them.
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use stwo::core::vcs_lifted::blake2_merkle::Blake2sM31MerkleChannel;
 use stwo::prover::backend::simd::SimdBackend;
@@ -38,6 +42,8 @@ static CALLS: AtomicUsize = AtomicUsize::new(0);
 /// The commitments since the last [`take_commitments`], the latest [`MAX_COMMITMENTS`].
 static COMMITMENTS: Mutex<Vec<Commitment>> = Mutex::new(Vec::new());
 const MAX_COMMITMENTS: usize = 64;
+/// The keep-warm window [`set_keep_warm`] set (`None` until called: the environment's).
+static KEEP_WARM: Mutex<Option<Option<Duration>>> = Mutex::new(None);
 
 /// One striped commitment the hook was asked for.
 #[derive(Clone, Debug)]
@@ -87,6 +93,19 @@ pub fn env_enabled() -> bool {
         .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
 }
 
+/// Sets how long the committer keeps the GPU's clocks up after each commitment, in milliseconds (0:
+/// never, the default unless `STWO_GPU_KEEP_WARM_MS` says otherwise), for the commitments from now
+/// on: now if there is a committer, or when the GPU is first turned on. A GPU that was turned off
+/// is not kept warm again in this process (see [`shutdown`]).
+pub fn set_keep_warm(milliseconds: u32) {
+    let window = (milliseconds > 0).then(|| Duration::from_millis(milliseconds.into()));
+    *KEEP_WARM.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(window);
+    if let Some(Ok(committer)) = COMMITTER.get() {
+        committer.set_keep_warm(window);
+    }
+    tracing::info!("GPU keep-warm: {milliseconds} ms");
+}
+
 /// Stops the committer's keep-warm thread, if there is a committer: no more GPU work in the
 /// background. Call it before the process exits: the driver torn down under a keep-warm submission
 /// crashed os_native_probe at exit. Commitments still work after it, without keep-warm.
@@ -120,6 +139,9 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
         committer
     });
     let committer = committer.clone()?;
+    if let Some(window) = *KEEP_WARM.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+        committer.set_keep_warm(window);
+    }
     let adapter = describe(&committer);
     set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(hook(committer)));
     tracing::info!("GPU commitment on: {adapter}");

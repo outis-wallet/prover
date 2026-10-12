@@ -64,7 +64,10 @@ or a machine without a GPU, falls back to the CPU; the proof is byte-identical e
 
 **Natively** (`src/gpu/native.rs`), through wgpu (stwo-gpu-spike, from the proving fork):
 `OUTIS_GPU=1` in the environment, or `tx_prove_set_gpu` in the C interface, turns it on. The
-adapter is wgpu's choice, steered by `WGPU_BACKEND` and `WGPU_ADAPTER_NAME`.
+adapter is wgpu's choice, steered by `WGPU_BACKEND` and `WGPU_ADAPTER_NAME`. Keep-warm (the GPU
+kept at full clocks for a window after each commitment, so the next one doesn't start on a GPU that
+lowered its clocks) is off by default: `STWO_GPU_KEEP_WARM_MS=<ms>`, or
+`tx_prove_set_gpu_keep_warm(ms)`, turns it on.
 
 **In browsers (experimental)** (`src/gpu/web.rs`). `scripts/build-wasm.sh web-gpu` builds the
 threaded module with feature `gpu` into `pkg-mt-gpu/`: stwo's striped commitments go to a page's

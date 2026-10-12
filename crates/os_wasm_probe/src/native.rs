@@ -289,6 +289,24 @@ pub extern "C" fn tx_prove_set_gpu(enabled: u32) -> *mut c_char {
     into_c_string(answer.to_string())
 }
 
+/// Sets how long, in milliseconds, the GPU is kept at full clocks after each of its commitments (0:
+/// never), for the proofs from now on (see `gpu::set_keep_warm`; only in a library built with the
+/// `gpu` feature). Off by default, unless `STWO_GPU_KEEP_WARM_MS` is in the environment. A GPU
+/// lowers its clocks within a second or two between a proof's commitments, and the next one starts
+/// slow: keeping it warm saves about 0.1 s a proof (RTX 3080), for the power of a GPU at full clocks
+/// (about 100 W there) while it lasts. Not after the GPU was turned off with `tx_prove_set_gpu(0)`.
+/// Returns `{"ok": milliseconds}`. Free the answer with `tx_prove_free`.
+#[cfg(feature = "gpu")]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu_keep_warm(milliseconds: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| {
+        crate::gpu::set_keep_warm(milliseconds);
+        json!({ "ok": milliseconds })
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
 /// A C string argument as UTF-8.
 unsafe fn argument<'a>(pointer: *const c_char, name: &str) -> Result<&'a str, String> {
     if pointer.is_null() {
