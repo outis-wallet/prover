@@ -34,7 +34,9 @@ use stwo::prover::backend::simd::SimdBackend;
 use stwo::prover::poly::circle::{part_domain, PolyOps};
 use stwo::prover::{set_striped_commit_hook, Poly, StripedCommitHook};
 use stwo_constraint_framework::{set_trace_part_hook, TracePartHook, TracePartRequest};
+use stwo_constraint_framework::constraint_hook::set_constraint_eval_hook;
 use stwo_gpu_spike::committer::{Declined, GpuCommitter};
+use stwo_gpu_spike::constraint::composer::{default_library, ComposerConfig, ComposerStats, GpuComposer};
 use stwo_gpu_spike::parts::{PartStats, PartsMode};
 
 /// The process's committer once the GPU was first turned on, or why there is none.
@@ -117,12 +119,120 @@ pub fn shutdown() {
     if let Some(Ok(committer)) = COMMITTER.get() {
         committer.shutdown();
     }
+    if let Some(composer) = COMPOSER.get() {
+        composer.shutdown();
+    }
+}
+
+/// Constraint evaluation on the GPU (the composition, see stwo-gpu-spike's `composer`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Composition {
+    Off,
+    /// The components the GPU takes are evaluated there.
+    On,
+    /// Evaluated on the GPU and on the CPU, compared; the CPU's result is used.
+    Shadow,
+}
+
+/// The composition mode [`set_composition`] set (`None` until called: the environment's).
+static COMPOSITION: Mutex<Option<Composition>> = Mutex::new(None);
+/// The process's composer, once composition was first turned on with the GPU.
+static COMPOSER: OnceLock<Arc<GpuComposer>> = OnceLock::new();
+/// Whether the GPU is on (its hooks registered).
+static GPU_ON: Mutex<bool> = Mutex::new(false);
+
+/// The composition mode: [`set_composition`]'s, else `OUTIS_GPU_COMPOSITION` (`1`, `on`, `true`;
+/// `shadow`), else off.
+pub fn composition() -> Composition {
+    if let Some(mode) = *COMPOSITION.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+        return mode;
+    }
+    match std::env::var("OUTIS_GPU_COMPOSITION").unwrap_or_default().to_ascii_lowercase().as_str() {
+        "1" | "on" | "true" => Composition::On,
+        "shadow" => Composition::Shadow,
+        _ => Composition::Off,
+    }
+}
+
+/// Sets the composition mode for the proofs from now on (off by default): with the GPU on, the
+/// components of every proof's composition the GPU takes are evaluated there (`On`), or there and
+/// on the CPU, compared (`Shadow`). Only with the GPU on (see [`set_gpu`]); takes effect now if it
+/// is, otherwise when it is turned on.
+pub fn set_composition(mode: Composition) {
+    *COMPOSITION.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(mode);
+    let gpu_on = *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let (true, Some(Ok(committer))) = (gpu_on, COMMITTER.get()) {
+        apply_composition(committer);
+    }
+    tracing::info!("GPU composition: {mode:?}");
+}
+
+/// The composer's counts since the last call, and its kernels' (ready, compiling, failed).
+pub fn take_composition_stats() -> Option<(ComposerStats, (usize, usize, usize))> {
+    let composer = COMPOSER.get()?;
+    Some((composer.take_stats(), composer.kernel_counts()))
+}
+
+/// Waits until no constraint kernel is compiling, at most `timeout` (for tests: a proof never
+/// waits for them itself).
+pub fn wait_composition_compiled(timeout: Duration) -> bool {
+    COMPOSER.get().is_none_or(|composer| composer.wait_compiled(timeout))
+}
+
+/// The most GPU memory the commitments keep for the composition: `OUTIS_GPU_COMPOSITION_VRAM_MIB`,
+/// else 4 GiB (a leg's resident columns take about 2.1 GiB in the privacy proofs).
+fn composition_budget() -> u64 {
+    std::env::var("OUTIS_GPU_COMPOSITION_VRAM_MIB")
+        .ok()
+        .and_then(|mib| mib.parse::<u64>().ok())
+        .map_or(4 << 30, |mib| mib << 20)
+}
+
+/// Registers (or removes) the composition's hooks as [`composition`] says, on `committer`.
+fn apply_composition(committer: &Arc<GpuCommitter>) {
+    let mode = composition();
+    if mode == Composition::Off {
+        set_constraint_eval_hook(None);
+        if committer.parts_mode() == PartsMode::Resident {
+            committer.set_parts_mode(PartsMode::from_env());
+            committer.clear_parts();
+            if committer.parts_mode() == PartsMode::Off {
+                set_trace_part_hook(None);
+            }
+        }
+        return;
+    }
+    // The columns stay resident on the GPU (stripes 0 and 1), within the budget; stripe 1 serves
+    // the components the CPU evaluates.
+    committer.set_parts_mode(PartsMode::Resident);
+    committer.set_parts_budget(Some(composition_budget()));
+    set_trace_part_hook(Some(part_hook(committer.clone())));
+    let only = std::env::var("OUTIS_GPU_COMPOSITION_ONLY")
+        .map(|o| o.split(',').filter(|s| !s.is_empty()).map(str::to_owned).collect())
+        .unwrap_or_default();
+    let composer = COMPOSER
+        .get_or_init(|| {
+            GpuComposer::new(
+                committer.clone(),
+                ComposerConfig {
+                    library: default_library(),
+                    shadow: mode == Composition::Shadow,
+                    only,
+                    ..Default::default()
+                },
+            )
+        })
+        .clone();
+    composer.set_shadow(mode == Composition::Shadow);
+    set_constraint_eval_hook(Some(Arc::new(move |job, accum| composer.evaluate(job, accum))));
 }
 
 fn apply(enabled: bool) -> Result<Option<String>, String> {
+    *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = enabled;
     if !enabled {
         set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(None);
         set_trace_part_hook(None);
+        set_constraint_eval_hook(None);
         shutdown();
         tracing::info!("GPU commitment off");
         return Ok(None);
@@ -154,6 +264,11 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
     if parts_mode != PartsMode::Off {
         set_trace_part_hook(Some(part_hook(committer.clone())));
         tracing::info!("GPU part extension: {parts_mode:?}");
+    }
+    // Constraint evaluation on the GPU only with a mode (`OUTIS_GPU_COMPOSITION`,
+    // `set_composition`): off by default.
+    if composition() != Composition::Off {
+        apply_composition(&committer);
     }
     set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(hook(committer)));
     tracing::info!("GPU commitment on: {adapter}");

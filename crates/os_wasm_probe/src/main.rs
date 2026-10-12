@@ -76,12 +76,49 @@ fn replay(capture: &Path, out: Option<&Path>) {
             .build_global()
             .expect("thread pool");
     }
-    let report = os_wasm_probe::replay::replay(capture, &|event| match event {
-        Progress::Transaction { block, tx_hash } => println!("block {block}, tx {tx_hash}"),
-        Progress::Note { message } => println!("{message}"),
-        Progress::Phase { phase: Phase::Prove } => println!("proving"),
-        _ => {}
-    });
+    // REPLAY_REPEAT=N proves N times in this process (e.g. a cold first proof, then warm ones);
+    // the summary is the last one's.
+    let repeat: usize = std::env::var("REPLAY_REPEAT").ok().and_then(|n| n.parse().ok()).unwrap_or(1);
+    let mut report = None;
+    for round in 0..repeat.max(1) {
+        #[cfg(feature = "gpu")]
+        if let Ok(ms) = std::env::var("OUTIS_GPU_COMPOSITION_WAIT_MS") {
+            // For tests: the constraint kernels known to the library compiled before the proof
+            // (a proof never waits for them itself).
+            let ms = ms.parse().expect("OUTIS_GPU_COMPOSITION_WAIT_MS");
+            let ready = os_wasm_probe::gpu::wait_composition_compiled(Duration::from_millis(ms));
+            println!("constraint kernels compiled before proof {round}: {ready}");
+        }
+        let started = Instant::now();
+        let this = os_wasm_probe::replay::replay(capture, &|event| match event {
+            Progress::Transaction { block, tx_hash } => println!("block {block}, tx {tx_hash}"),
+            Progress::Note { message } => println!("{message}"),
+            Progress::Phase { phase: Phase::Prove } => println!("proving"),
+            _ => {}
+        });
+        if repeat > 1 {
+            println!(
+                "proof {round}: prove {:.2} s, {} in {:.2} s",
+                this.prove_s,
+                if this.identical { "IDENTICAL" } else { "DIFFERENT" },
+                started.elapsed().as_secs_f64()
+            );
+        }
+        #[cfg(feature = "gpu")]
+        if let Some((stats, (ready, compiling, failed))) = os_wasm_probe::gpu::take_composition_stats() {
+            println!(
+                "proof {round}: {}; kernels ready {ready}, compiling {compiling}, failed {failed}",
+                stwo_gpu_spike::constraint::composer::describe(&stats)
+            );
+            let mut per: Vec<_> = stats.per_component.iter().collect();
+            per.sort_by(|a, b| b.1 .1.total_cmp(&a.1 .1));
+            for (name, (count, seconds)) in per {
+                println!("  composition {name}: {count} x, {:.1} ms", seconds * 1e3);
+            }
+        }
+        report = Some(this);
+    }
+    let report = report.expect("a proof");
     if let Some(out) = out {
         std::fs::write(out, &report.result_json).expect("write result");
     }

@@ -289,6 +289,30 @@ pub extern "C" fn tx_prove_set_gpu(enabled: u32) -> *mut c_char {
     into_c_string(answer.to_string())
 }
 
+/// Sets constraint evaluation on the GPU (the composition) for the proofs from now on, with the
+/// GPU on (see `tx_prove_set_gpu`; only in a library built with the `gpu` feature, natively):
+/// 0 off (the default, unless `OUTIS_GPU_COMPOSITION` says otherwise), 1 on, 2 shadow (evaluated
+/// on the GPU and on the CPU and compared, the CPU's result used; for debugging). A component the
+/// GPU can't take yet (its kernels compile in the background, the first time) is evaluated on the
+/// CPU; the proof is the same either way. Returns `{"ok": mode}`. Free the answer with
+/// `tx_prove_free`.
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu_composition(mode: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| {
+        let composition = match mode {
+            0 => crate::gpu::Composition::Off,
+            1 => crate::gpu::Composition::On,
+            2 => crate::gpu::Composition::Shadow,
+            _ => return json!({ "error": format!("mode {mode}: 0 off, 1 on, 2 shadow") }),
+        };
+        crate::gpu::set_composition(composition);
+        json!({ "ok": mode })
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
 /// Sets how long, in milliseconds, the GPU is kept at full clocks after each of its commitments (0:
 /// never), for the proofs from now on (see `gpu::set_keep_warm`; only in a library built with the
 /// `gpu` feature). Off by default, unless `STWO_GPU_KEEP_WARM_MS` is in the environment. A GPU
