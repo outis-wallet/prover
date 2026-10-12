@@ -243,6 +243,8 @@ pub enum Decommit {
 static DECOMMIT: Mutex<Option<Decommit>> = Mutex::new(None);
 /// Shadow mode's counts: (columns compared, values that differ).
 static DECOMMIT_SHADOW: Mutex<(u64, u64)> = Mutex::new((0, 0));
+/// The decommitment hook's calls so far (for `OUTIS_GPU_DECOMMIT_TAMPER=call:N`).
+static DECOMMIT_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 /// The decommitment mode: [`set_decommit`]'s, else `OUTIS_GPU_DECOMMIT` (`1`, `on`, `true`;
 /// `shadow`), else off.
@@ -310,9 +312,14 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
         committer.set_parts_mode(PartsMode::Coefficients);
     }
     committer.set_decommit(true);
-    let tamper = std::env::var("OUTIS_GPU_DECOMMIT_TAMPER").is_ok_and(|v| v == "1");
+    // Tests of the proof's checks: `1` changes the first opened value of every decommitment,
+    // `call:N` every opened value of the N-th one (from 1, counted over the process).
+    let tamper = std::env::var("OUTIS_GPU_DECOMMIT_TAMPER").ok();
+    let tamper_call = tamper.as_deref().and_then(|v| v.strip_prefix("call:")?.parse::<usize>().ok());
+    let tamper_first = tamper.as_deref() == Some("1");
     let committer = committer.clone();
     set_striped_decommit_hook::<SimdBackend>(Some(Arc::new(move |columns, wanted| {
+        let call = DECOMMIT_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
         let mut values = committer.decommit_values(columns, wanted)?;
         match mode {
             Decommit::Shadow => {
@@ -334,9 +341,12 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
                 None
             }
             _ => {
-                // A test of the proof's checks: one opened value changed.
-                if tamper && let Some(first) = values.iter_mut().find(|v| !v.is_empty()) {
-                    first[0] = BaseField::from_u32_unchecked((first[0].0 + 1) % ((1 << 31) - 1));
+                let bump = |v: &mut BaseField| *v = BaseField::from_u32_unchecked((v.0 + 1) % ((1 << 31) - 1));
+                if tamper_first && let Some(first) = values.iter_mut().find(|v| !v.is_empty()) {
+                    bump(&mut first[0]);
+                }
+                if tamper_call == Some(call) {
+                    values.iter_mut().flatten().for_each(bump);
                 }
                 Some(values)
             }
