@@ -36,8 +36,8 @@ use stwo::core::fields::m31::BaseField;
 use stwo::prover::poly::BitReversedOrder;
 use stwo::prover::poly::circle::CircleEvaluation;
 use stwo::prover::{
-    set_ood_sample_hook, set_striped_commit_hook, set_striped_decommit_hook, OodSampleGroup, Poly,
-    StripedCommitHook,
+    set_fri_quotients_hook, set_ood_sample_hook, set_striped_commit_hook, set_striped_decommit_hook,
+    FriQuotientsRequest, OodSampleGroup, Poly, StripedCommitHook,
 };
 use stwo_constraint_framework::{set_trace_part_hook, TracePartHook, TracePartRequest};
 use stwo_constraint_framework::constraint_hook::set_constraint_eval_hook;
@@ -316,6 +316,7 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
             committer.clear_parts();
         }
         apply_ood(committer);
+        apply_fri(committer);
         return;
     }
     // The coefficients the decommitments read (composition's mode, or set here).
@@ -325,8 +326,10 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
     committer.set_decommit(true);
     // Tests of the proof's checks: `1` changes the first opened value of every decommitment,
     // `call:N` every opened value of the N-th one (from 1, counted over the process).
-    // The out-of-domain samples read the coefficients kept for the decommitment.
+    // The out-of-domain samples and the FRI quotients read the coefficients kept for the
+    // decommitment.
     apply_ood(committer);
+    apply_fri(committer);
     let tamper = std::env::var("OUTIS_GPU_DECOMMIT_TAMPER").ok();
     let tamper_call = tamper.as_deref().and_then(|v| v.strip_prefix("call:")?.parse::<usize>().ok());
     let tamper_first = tamper.as_deref() == Some("1");
@@ -481,6 +484,114 @@ fn apply_ood(committer: &Arc<GpuCommitter>) {
     })));
 }
 
+/// The FRI quotients on the GPU (stwo's FRI quotients hook, see stwo-gpu-spike's `fri`). They
+/// read the coefficients kept until the decommitment: only with the decommitment on the GPU (or
+/// in its shadow mode).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fri {
+    Off,
+    /// The quotients are computed on the GPU.
+    On,
+    /// Computed on the GPU and on the CPU, compared; the CPU's are used.
+    Shadow,
+}
+
+/// The FRI quotients mode [`set_fri`] set (`None` until called: the environment's).
+static FRI: Mutex<Option<Fri>> = Mutex::new(None);
+/// Shadow mode's counts: (words compared, words that differ).
+static FRI_SHADOW: Mutex<(u64, u64)> = Mutex::new((0, 0));
+/// The FRI quotients hook's calls so far (for `OUTIS_GPU_FRI_TAMPER=call:N`).
+static FRI_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// The FRI quotients mode: [`set_fri`]'s, else `OUTIS_GPU_FRI` (`1`, `on`, `true`; `shadow`),
+/// else off.
+pub fn fri() -> Fri {
+    if let Some(mode) = *FRI.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+        return mode;
+    }
+    match std::env::var("OUTIS_GPU_FRI").unwrap_or_default().to_ascii_lowercase().as_str() {
+        "1" | "on" | "true" => Fri::On,
+        "shadow" => Fri::Shadow,
+        _ => Fri::Off,
+    }
+}
+
+/// Sets the FRI quotients mode for the proofs from now on (off by default), with the GPU and its
+/// decommitment on. Takes effect now if the GPU is on, otherwise when it is turned on.
+pub fn set_fri(mode: Fri) {
+    *FRI.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(mode);
+    let gpu_on = *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let (true, Some(Ok(committer))) = (gpu_on, COMMITTER.get()) {
+        apply_fri(committer);
+    }
+    tracing::info!("GPU FRI quotients: {mode:?}");
+}
+
+/// The FRI quotients' counts since the last call, and shadow mode's (words compared, words that
+/// differ).
+pub fn take_fri_stats() -> Option<(stwo_gpu_spike::committer::FriStats, (u64, u64))> {
+    let Some(Ok(committer)) = COMMITTER.get() else { return None };
+    let shadow = std::mem::take(&mut *FRI_SHADOW.lock().unwrap_or_else(|p| p.into_inner()));
+    Some((committer.take_fri_stats(), shadow))
+}
+
+/// Registers (or removes) the FRI quotients hook as [`fri`] and [`decommit`] say, on `committer`.
+fn apply_fri(committer: &Arc<GpuCommitter>) {
+    let mode = fri();
+    if mode == Fri::Off || decommit() == Decommit::Off {
+        set_fri_quotients_hook::<SimdBackend>(None);
+        return;
+    }
+    // Tests of the proof's checks: a value of the N-th quotients (from 1, counted over the
+    // process) the GPU computed changed.
+    let tamper_call = std::env::var("OUTIS_GPU_FRI_TAMPER")
+        .ok()
+        .and_then(|v| v.strip_prefix("call:")?.parse::<usize>().ok());
+    let committer = committer.clone();
+    set_fri_quotients_hook::<SimdBackend>(Some(Arc::new(move |request: &FriQuotientsRequest<'_, SimdBackend>| {
+        let call = FRI_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut quotients = committer.fri_quotients(request)?;
+        match mode {
+            Fri::Shadow => {
+                let cpu = stwo::prover::pcs::quotient_ops::compute_fri_quotients(
+                    request.columns,
+                    request.samples,
+                    request.random_coeff,
+                    request.lifting_log_size,
+                    request.twiddles,
+                    request.log_blowup_factor,
+                );
+                let (mut compared, mut different) = (0u64, 0u64);
+                for (gpu, cpu) in quotients.values.columns.iter().zip(&cpu.values.columns) {
+                    compared += gpu.length as u64;
+                    different += gpu
+                        .as_slice()
+                        .iter()
+                        .zip(cpu.as_slice())
+                        .filter(|(a, b)| a.0 != b.0)
+                        .count() as u64;
+                }
+                if different > 0 {
+                    tracing::warn!("FRI quotients shadow: {different} words differ");
+                }
+                let mut shadow = FRI_SHADOW.lock().unwrap_or_else(|p| p.into_inner());
+                shadow.0 += compared;
+                shadow.1 += different;
+                None
+            }
+            _ => {
+                if tamper_call == Some(call) {
+                    use stwo::prover::backend::Column;
+                    let column = &mut quotients.values.columns[0];
+                    let value = column.at(0);
+                    column.set(0, value + BaseField::from(1u32));
+                }
+                Some(quotients)
+            }
+        }
+    })));
+}
+
 /// Registers (or removes) the composition's hooks as [`composition`] says, on `committer`.
 fn apply_composition(committer: &Arc<GpuCommitter>) {
     let mode = composition();
@@ -531,6 +642,7 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
         set_constraint_eval_hook(None);
         set_striped_decommit_hook::<SimdBackend>(None);
         set_ood_sample_hook::<SimdBackend>(None);
+        set_fri_quotients_hook::<SimdBackend>(None);
         shutdown();
         tracing::info!("GPU commitment off");
         return Ok(None);
@@ -575,6 +687,9 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
     // The out-of-domain samples on the GPU only with a mode (`OUTIS_GPU_OOD`, `set_ood`) and the
     // decommitment's.
     apply_ood(&committer);
+    // The FRI quotients on the GPU only with a mode (`OUTIS_GPU_FRI`, `set_fri`) and the
+    // decommitment's.
+    apply_fri(&committer);
     set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(hook(committer)));
     tracing::info!("GPU commitment on: {adapter}");
     Ok(Some(adapter))
@@ -669,7 +784,10 @@ pub fn self_verify_needed() -> bool {
     gpu_on
         && !off_for_tests
         && matches!(COMMITTER.get(), Some(Ok(_)))
-        && (composition() != Composition::Off || decommit() != Decommit::Off || ood() != Ood::Off)
+        && (composition() != Composition::Off
+            || decommit() != Decommit::Off
+            || ood() != Ood::Off
+            || fri() != Fri::Off)
 }
 
 /// The modes [`suspend_hooks`] turned off, put back when dropped.
@@ -677,6 +795,7 @@ pub struct HooksSuspended {
     composition: Option<Composition>,
     decommit: Option<Decommit>,
     ood: Option<Ood>,
+    fri: Option<Fri>,
 }
 
 /// Turns the GPU hooks beyond the commitment (composition, decommitment, out-of-domain samples)
@@ -689,7 +808,9 @@ pub fn suspend_hooks() -> HooksSuspended {
         composition: get(&COMPOSITION),
         decommit: get(&DECOMMIT),
         ood: get(&OOD),
+        fri: get(&FRI),
     };
+    set_fri(Fri::Off);
     set_ood(Ood::Off);
     set_decommit(Decommit::Off);
     set_composition(Composition::Off);
@@ -701,6 +822,7 @@ impl Drop for HooksSuspended {
         *COMPOSITION.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.composition;
         *DECOMMIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.decommit;
         *OOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.ood;
+        *FRI.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.fri;
         let gpu_on = *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let (true, Some(Ok(committer))) = (gpu_on, COMMITTER.get()) {
             // As `apply` does: the composition, then the decommitment (and the samples).
@@ -710,10 +832,12 @@ impl Drop for HooksSuspended {
             apply_decommit(committer);
         }
         tracing::info!(
-            "GPU hooks back: composition {:?}, decommitment {:?}, out-of-domain samples {:?}",
+            "GPU hooks back: composition {:?}, decommitment {:?}, out-of-domain samples {:?}, \
+             FRI quotients {:?}",
             composition(),
             decommit(),
-            ood()
+            ood(),
+            fri()
         );
     }
 }

@@ -613,23 +613,38 @@ impl TxSession {
         #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
         crate::gpu::proof_starts();
         // With a GPU hook beyond the commitment, the proof is verified before it is returned, and
-        // proved again without those hooks if it fails: the run is kept for that.
+        // proved again without those hooks if it fails, if the prover fails, or if it panics
+        // (stwo's own checks, e.g. FRI's last layer's degree): the run is kept for that.
         #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
-        let retry_pie = crate::gpu::self_verify_needed().then(|| pie.clone());
+        if crate::gpu::self_verify_needed() {
+            let retry_pie = pie.clone();
+            let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                privacy_prove::privacy_recursive_prove_once_stoppable(pie, &self.cancel)
+            }));
+            let result = match attempt {
+                Ok(output) => self.prove_result(output.map(|output| {
+                    (Proof::from(output.proof), ProgramOutput::from(output.output_preimage))
+                })),
+                Err(panic) => {
+                    let text = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "a panic".to_string());
+                    Err(fail(&format!("prover panicked: {text}")))
+                }
+            };
+            return self.verified_or_proved_again(result, retry_pie);
+        }
         // One proof per session: each leg's precomputes go when the leg ends, and none outlive
         // the proof. Natively, the session's cancel flag stops it between steps.
         #[cfg(target_arch = "wasm32")]
         let output = privacy_prove::privacy_recursive_prove_once(pie);
         #[cfg(not(target_arch = "wasm32"))]
         let output = privacy_prove::privacy_recursive_prove_once_stoppable(pie, &self.cancel);
-        let result = self.prove_result(output.map(|output| {
+        self.prove_result(output.map(|output| {
             (Proof::from(output.proof), ProgramOutput::from(output.output_preimage))
-        }));
-        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
-        if let Some(pie) = retry_pie {
-            return self.verified_or_proved_again(result, pie);
-        }
-        result
+        }))
     }
 }
 

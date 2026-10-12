@@ -34,7 +34,7 @@ fn main() {
     }
     let usage = "usage: os_native_probe os <input.json> | verify <response.json> | replay <capture dir> [out.json] \
                  | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu] [--keep-warm MS] \
-                 [--composition 0|1|2] [--decommit 0|1|2] [--ood 0|1|2]";
+                 [--composition 0|1|2] [--decommit 0|1|2] [--ood 0|1|2] [--fri 0|1|2]";
     let option = |name: &str| {
         args.iter().position(|arg| arg == name).map(|index| args[index + 1].parse::<f64>().expect(name))
     };
@@ -64,6 +64,7 @@ fn main() {
             option("--composition").map(|mode| mode as u32),
             option("--decommit").map(|mode| mode as u32),
             option("--ood").map(|mode| mode as u32),
+            option("--fri").map(|mode| mode as u32),
         ),
         _ => panic!("{usage}"),
     }
@@ -121,6 +122,19 @@ fn replay(capture: &Path, out: Option<&Path>) {
                      shadow {compared} columns compared, {different} values differ",
                     stats.served, stats.trees, stats.not_resident, stats.failed, stats.columns, stats.positions, stats.seconds,
                     stats.times.plan, stats.times.setup, stats.times.gpu, stats.times.finish,
+                );
+            }
+        }
+        #[cfg(feature = "gpu")]
+        if let Some((stats, (compared, different))) = os_wasm_probe::gpu::take_fri_stats() {
+            if stats.calls > 0 {
+                println!(
+                    "proof {round}: FRI quotients on the GPU: {} of {} ({} declined, {} refused for video memory, {} failed{}), \
+                     {} columns ({} from values), {:.3} s (plan {:.3}, setup {:.3}, GPU {:.3}); shadow {compared} words compared, {different} words differ",
+                    stats.served, stats.calls, stats.declined, stats.refused_vram, stats.failed,
+                    stats.reason.as_deref().map(|r| format!(": {r}")).unwrap_or_default(),
+                    stats.columns, stats.value_columns, stats.seconds,
+                    stats.times.plan, stats.times.setup, stats.times.gpu,
                 );
             }
         }
@@ -351,6 +365,7 @@ fn ffi(
     composition: Option<u32>,
     decommit: Option<u32>,
     ood: Option<u32>,
+    fri: Option<u32>,
 ) {
     // --gpu: the GPU through the C entry point, as an app turns it on. Without it, OUTIS_GPU=1
     // turns it on at the proof, as for an app that sets the environment.
@@ -391,6 +406,12 @@ fn ffi(
         println!("tx_prove_set_gpu_ood({mode}): {}", take(os_wasm_probe::native::tx_prove_set_gpu_ood(mode)));
         #[cfg(not(feature = "gpu"))]
         panic!("--ood {mode}: built without the gpu feature");
+    }
+    if let Some(mode) = fri {
+        #[cfg(feature = "gpu")]
+        println!("tx_prove_set_gpu_fri({mode}): {}", take(os_wasm_probe::native::tx_prove_set_gpu_fri(mode)));
+        #[cfg(not(feature = "gpu"))]
+        panic!("--fri {mode}: built without the gpu feature");
     }
     if gpu {
         #[cfg(feature = "gpu")]
