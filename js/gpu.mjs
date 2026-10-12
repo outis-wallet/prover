@@ -11,13 +11,23 @@
 //
 // Without WebGPU (or an adapter) gpu.ready is false, and the proof runs on the CPU: send no port.
 // scripts/build-web-engine.sh puts this file at engine/gpu.mjs and the GPU worker at gpu/.
+//
+// The GPU worker keeps what its commitments reuse between proofs (the device buffers of the largest
+// tree so far, the twiddles, its transfer rings, the plans of the last trees: about 1.7 GiB of video
+// memory for an Outis proof): the page's later proofs start with them. gpu.release() frees them,
+// for a page done proving for a while (the next proof makes them again).
 
 /**
- * Starts the GPU worker and resolves when it has a device (or failed to get one). `configure`
- * goes to the worker first: transfer sizes in bytes (`upload_chunk`, `upload_window`,
- * `readback_chunk`), `kick_ms` (Firefox's poll kicks), `compute_twiddles` (compute the
- * commitments' twiddles in the worker rather than read the prover's). A worker with no device
- * after `timeoutMs` counts as failed (a wedged driver can leave requestAdapter pending).
+ * Starts the GPU worker and resolves when it has a device (or failed to get one). `configure` goes
+ * to the worker first (each key optional): `kick_ms` (Firefox's poll kicks), and the commitments'
+ * `compute_twiddles` (compute the twiddles in the worker rather than read the prover's),
+ * `commit_chunk` (its transfer rings' chunk in bytes, 32 MiB), `upload_ring` and `readback_ring`
+ * (their depths, 3 and 3), `max_gpu_mib` (a commitment needing more video memory goes to the CPU),
+ * `max_plans` (the trees whose plans are kept, by shape, 16), `keep` (false: every commitment frees
+ * what it used), `streamed` (false: stripe by stripe, without overlapping its transfers), `upload`
+ * ("write": writeBuffer instead of the ring), `serial` and `timestamps` (diagnostics: each phase
+ * timed alone; the GPU's own time). A worker with no device after `timeoutMs` counts as failed (a
+ * wedged driver can leave requestAdapter pending).
  */
 export async function startGpu({ url = new URL("../gpu/gpu.worker.mjs", import.meta.url), configure, timeoutMs = 20000 } = {}) {
   const worker = new Worker(url, { type: "module" });
@@ -38,6 +48,10 @@ export async function startGpu({ url = new URL("../gpu/gpu.worker.mjs", import.m
       const channel = new MessageChannel();
       worker.postMessage({ connect: channel.port1 }, [channel.port1]);
       return channel.port2;
+    },
+    /** Frees what the commitments keep between proofs (not while a proof is attached). */
+    release() {
+      worker.postMessage({ release: true });
     },
     terminate() {
       worker.terminate();

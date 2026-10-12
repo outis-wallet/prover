@@ -219,29 +219,51 @@ fn commit(
     // Written by the GPU worker, through a pointer the compiler can't follow.
     let word = |at: usize| unsafe { std::ptr::read_volatile(desc.as_ptr().add(at)) } as u64;
     let stat = |k: usize| f64::from_bits(word(d::D_STATS + 2 * k) | word(d::D_STATS + 2 * k + 1) << 32);
+    // The GPU worker's times (see the bridge's `commit::ST_*`): the upload, the compute and the
+    // readback overlap (commit_ms is the whole of them), so each is that side's own work; in the
+    // worker's serial mode (serial: 1) each phase is waited for, and is its time alone. The GPU's
+    // own time (gpu_*) when the worker times it (its timestamps option), 0 otherwise.
+    let mib = |k: usize| stat(k) / (1 << 20) as f64;
     record(format!(
         "{{{shape},\"ran\":\"gpu\",\"hook_ms\":{:.1},\"alloc_ms\":{:.1},\"wait_ms\":{:.1},\
-         \"wake_ms\":{:.2},\"serve_ms\":{:.1},\"twiddles_ms\":{:.1},\"twiddles_from_prover\":{},\
-         \"setup_ms\":{:.1},\"upload_ms\":{:.1},\"upload_wait_ms\":{:.1},\"compute_ms\":{:.1},\
-         \"readback_ms\":{:.1},\"readback_wait_ms\":{:.1},\"destroy_ms\":{:.1},\"upload_mib\":{:.1},\
-         \"readback_mib\":{:.1},\"gpu_mib\":{:.1}}}",
+         \"wake_ms\":{:.2},\"serve_ms\":{:.1},\"twiddles_ms\":{:.1},\"twiddles_computed\":{},\
+         \"twiddles_from_prover\":{},\"setup_ms\":{:.1},\"plans_kept\":{},\"commit_ms\":{:.1},\
+         \"upload_ms\":{:.1},\"upload_wait_ms\":{:.1},\"compute_ms\":{:.1},\"readback_ms\":{:.1},\
+         \"readback_wait_ms\":{:.1},\"tail_ms\":{:.1},\"destroy_ms\":{:.1},\"streamed\":{},\
+         \"groups\":{},\"serial\":{},\"upload_mib\":{:.1},\"readback_mib\":{:.1},\"gpu_mib\":{:.1},\
+         \"held_mib\":{:.1},\"worker_ms\":{:.1},\"gpu_upload_ms\":{:.1},\"gpu_compute_ms\":{:.1},\
+         \"gpu_readback_ms\":{:.1},\"gpu_busy_ms\":{:.1},\"gpu_span_ms\":{:.1}}}",
         now() - started,
         allocated - started,
         completion.returned - allocated,
         completion.wake_ms(),
         completion.serve_ms(),
         stat(d::ST_TWIDDLES),
+        stat(d::ST_TWIDDLES_COMPUTED) as u32,
         stat(d::ST_TWIDDLES_FROM_PROVER) as u32,
         stat(d::ST_SETUP),
+        stat(d::ST_PLANS_KEPT) as u32,
+        stat(d::ST_COMMIT),
         stat(d::ST_UPLOAD),
         stat(d::ST_UPLOAD_WAIT),
         stat(d::ST_COMPUTE),
         stat(d::ST_READBACK),
         stat(d::ST_READBACK_WAIT),
+        stat(d::ST_TAIL),
         stat(d::ST_DESTROY),
-        stat(d::ST_UPLOAD_BYTES) / (1 << 20) as f64,
-        stat(d::ST_READBACK_BYTES) / (1 << 20) as f64,
-        stat(d::ST_GPU_BYTES) / (1 << 20) as f64,
+        stat(d::ST_STREAMED) as u32,
+        stat(d::ST_GROUPS) as u32,
+        stat(d::ST_SERIAL) as u32,
+        mib(d::ST_UPLOAD_BYTES),
+        mib(d::ST_READBACK_BYTES),
+        mib(d::ST_GPU_BYTES),
+        mib(d::ST_HELD_BYTES),
+        stat(d::ST_TOTAL),
+        stat(d::ST_GPU_UPLOAD),
+        stat(d::ST_GPU_COMPUTE),
+        stat(d::ST_GPU_READBACK),
+        stat(d::ST_GPU_BUSY),
+        stat(d::ST_GPU_SPAN),
     ));
     Ok(tree)
 }
