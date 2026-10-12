@@ -33,7 +33,8 @@ fn main() {
             .init();
     }
     let usage = "usage: os_native_probe os <input.json> | verify <response.json> | replay <capture dir> [out.json] \
-                 | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu] [--keep-warm MS]";
+                 | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu] [--keep-warm MS] \
+                 [--composition 0|1|2]";
     let option = |name: &str| {
         args.iter().position(|arg| arg == name).map(|index| args[index + 1].parse::<f64>().expect(name))
     };
@@ -60,6 +61,7 @@ fn main() {
             option("--cancel-after").map(Duration::from_secs_f64),
             args.iter().any(|arg| arg == "--gpu"),
             option("--keep-warm").map(|ms| ms as u32),
+            option("--composition").map(|mode| mode as u32),
         ),
         _ => panic!("{usage}"),
     }
@@ -302,7 +304,14 @@ fn take(answer: *mut c_char) -> String {
     text
 }
 
-fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>, gpu: bool, keep_warm: Option<u32>) {
+fn ffi(
+    capture: &Path,
+    threads: u32,
+    cancel_after: Option<Duration>,
+    gpu: bool,
+    keep_warm: Option<u32>,
+    composition: Option<u32>,
+) {
     // --gpu: the GPU through the C entry point, as an app turns it on. Without it, OUTIS_GPU=1
     // turns it on at the proof, as for an app that sets the environment.
     // --keep-warm MS: keep-warm through its C entry point, before the GPU is on.
@@ -314,6 +323,17 @@ fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>, gpu: bool, 
         );
         #[cfg(not(feature = "gpu"))]
         panic!("--keep-warm {milliseconds}: built without the gpu feature");
+    }
+    // --composition N: constraint evaluation on the GPU through the C entry point (0 off, 1 on,
+    // 2 shadow), before the GPU is turned on, as an app would.
+    if let Some(mode) = composition {
+        #[cfg(feature = "gpu")]
+        println!(
+            "tx_prove_set_gpu_composition({mode}): {}",
+            take(os_wasm_probe::native::tx_prove_set_gpu_composition(mode))
+        );
+        #[cfg(not(feature = "gpu"))]
+        panic!("--composition {mode}: built without the gpu feature");
     }
     if gpu {
         #[cfg(feature = "gpu")]
