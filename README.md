@@ -47,12 +47,22 @@ target/release/os_native_probe replay captures/pay      # proves, and compares w
 target/release/os_native_probe ffi captures/pay         # the same through the C interface
 target/release/os_native_probe ffi captures/pay --cancel-after 3   # cancels the proof 3 s in
 
+scripts/build-native.sh --features gpu                 # with the GPU commitment (wgpu), off until asked:
+OUTIS_GPU=1 target/release/os_native_probe replay captures/pay      # commits on the GPU, same proof
+
 scripts/build-wasm.sh node
 node js/replay.mjs captures/pay --prove                 # the same, in wasm (single-threaded)
 
 scripts/build-wasm.sh web                               # pkg-mt/, for browsers (COOP/COEP)
 scripts/build-web-engine.sh ../outis/wallet/apps/prover/public   # outis.cash/prover's engine
 ```
+
+The `gpu` feature (native only) commits the proof's striped trees on a GPU through wgpu
+(stwo-gpu-spike, from the proving fork), registered as stwo's striped-commit hook: `OUTIS_GPU=1`
+in the environment, or `tx_prove_set_gpu` in the C interface, turns it on (`src/gpu.rs`). The
+adapter is wgpu's choice, steered by `WGPU_BACKEND` and `WGPU_ADAPTER_NAME`. A commitment the GPU
+declines or fails, or a machine without a GPU, falls back to the CPU; the proof is byte-identical
+either way.
 
 The Outis Prover apps (iOS and Android) link the pipeline as a static library built from this
 repository (`--crate-type staticlib` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and

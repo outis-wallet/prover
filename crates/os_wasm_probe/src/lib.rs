@@ -5,6 +5,8 @@
 mod committer_utils;
 mod errors;
 mod executor;
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+pub mod gpu;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
@@ -604,6 +606,9 @@ impl TxSession {
         self.classes = HashMap::new();
         self.execution = None;
         self.query = None;
+        // With the `gpu` feature, OUTIS_GPU=1 turns the GPU commitment on (unless set already).
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        crate::gpu::apply_env();
         // One proof per session: each leg's precomputes go when the leg ends, and none outlive
         // the proof. Natively, the session's cancel flag stops it between steps.
         #[cfg(target_arch = "wasm32")]

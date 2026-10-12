@@ -42,6 +42,9 @@ js-sys = "=0.3.103"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `replay`: the C entry point runs the proof on a pool of the caller's size.
 rayon = "1.11"
+# `gpu`: the GPU's commitment as stwo's striped-commit hook (src/gpu.rs).
+stwo = { workspace = true, features = ["prover"], optional = true }
+stwo-gpu-spike = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # A rayon thread pool on Web Workers sharing the module's memory; rayon itself for stop_threads.
@@ -59,3 +62,6 @@ getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] 
 [features]
 # The threaded build (needs atomics and shared memory).
 threads = ["dep:wasm-bindgen-rayon", "dep:parking_lot_core", "dep:rayon"]
+# Natively, the striped commitments on a GPU (wgpu: Vulkan, Metal, DX12), when turned on: see
+# src/gpu.rs. Nothing on wasm32.
+gpu = ["dep:stwo", "dep:stwo-gpu-spike"]

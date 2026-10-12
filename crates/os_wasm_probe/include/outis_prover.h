@@ -40,8 +40,19 @@ void tx_session_cancel(TxNativeSession *session);
 void tx_session_close(TxNativeSession *session);
 
 /* Frees a string returned by this library (tx_session_call, tx_session_open's error,
-   tx_prove_replay). */
+   tx_prove_replay, tx_prove_set_gpu). */
 void tx_prove_free(char *answer);
+
+#ifdef OUTIS_PROVER_GPU
+/* Only in a library built with the `gpu` feature (define OUTIS_PROVER_GPU to declare it).
+   Turns the GPU commitment on (enabled != 0) or off for every proof from now on, process-wide.
+   Off by default, unless OUTIS_GPU=1 is in the environment at the first proof and this was not
+   called. Returns {"ok": "adapter (backend)"} when on, {"ok": null} when off, or
+   {"error": "message"} when there is no GPU to use (the proofs then stay on the CPU). Proofs are
+   byte-identical either way. The first call that turns it on creates the GPU device and compiles
+   its kernels (up to about a second). Free with tx_prove_free. */
+char *tx_prove_set_gpu(uint32_t enabled);
+#endif
 
 #ifdef __cplusplus
 }

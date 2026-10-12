@@ -7,7 +7,10 @@
 //! `ffi <capture dir> [--threads N] [--cancel-after S]`: the same through the C interface the apps
 //! link (include/outis_prover.h), proved and verified; with --cancel-after, the prove is cancelled
 //! S seconds in and the time it takes to return is measured.
-//! TRACE=info (or debug, ...) prints the prover's tracing events with their times.
+//! TRACE=info (or debug, ...) prints the prover's tracing events with their times, and each span's
+//! opening and closing (with its busy and idle time).
+//! With the `gpu` feature, OUTIS_GPU=1 commits on the GPU (see the library's `gpu`), and replay
+//! lists the commitments it was asked for; `ffi --gpu` turns it on through `tx_prove_set_gpu`.
 use std::ffi::{c_char, CStr, CString};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -24,11 +27,13 @@ fn main() {
         tracing_subscriber::fmt()
             .with_max_level(level.parse::<tracing::Level>().expect("TRACE: a tracing level"))
             .with_timer(tracing_subscriber::fmt::time::uptime())
-            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ENTER)
+            .with_span_events(
+                tracing_subscriber::fmt::format::FmtSpan::ENTER | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+            )
             .init();
     }
     let usage = "usage: os_native_probe os <input.json> | verify <response.json> | replay <capture dir> [out.json] \
-                 | ffi <capture dir> [--threads N] [--cancel-after S]";
+                 | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu]";
     let option = |name: &str| {
         args.iter().position(|arg| arg == name).map(|index| args[index + 1].parse::<f64>().expect(name))
     };
@@ -45,11 +50,15 @@ fn main() {
             let verdict = os_wasm_probe::verify_result(&input);
             println!("{verdict:?} in {:.2} s", started.elapsed().as_secs_f64());
         }
-        Some("replay") => replay(Path::new(&args[2]), args.get(3).map(Path::new)),
+        Some("replay") => {
+            gpu_from_env();
+            replay(Path::new(&args[2]), args.get(3).map(Path::new))
+        }
         Some("ffi") => ffi(
             Path::new(&args[2]),
             option("--threads").unwrap_or(0.0) as u32,
             option("--cancel-after").map(Duration::from_secs_f64),
+            args.iter().any(|arg| arg == "--gpu"),
         ),
         _ => panic!("{usage}"),
     }
@@ -72,6 +81,19 @@ fn replay(capture: &Path, out: Option<&Path>) {
     if let Some(out) = out {
         std::fs::write(out, &report.result_json).expect("write result");
     }
+    #[cfg(feature = "gpu")]
+    for commitment in os_wasm_probe::gpu::take_commitments() {
+        println!(
+            "commitment #{}: {} columns up to 2^{}, blowup 2^{}, lifted to 2^{}: {} {:.3} s",
+            commitment.index,
+            commitment.columns,
+            commitment.max_log_size,
+            commitment.log_blowup,
+            commitment.lifting_log_size,
+            commitment.declined.map_or("GPU".to_string(), |reason| format!("CPU ({reason}), hook")),
+            commitment.seconds,
+        );
+    }
     let footprint = report.peak.footprint_mib.map_or(String::new(), |mib| format!(", peak footprint {mib} MiB"));
     let proof_kib = report.proof_bytes / 1024;
     println!(
@@ -88,6 +110,23 @@ fn replay(capture: &Path, out: Option<&Path>) {
         report.os_steps,
         report.peak.rss_mib,
     );
+}
+
+/// With the `gpu` feature and OUTIS_GPU=1, the GPU committer, made before the proof (so its setup
+/// isn't counted in the prove time) and the adapter printed.
+fn gpu_from_env() {
+    #[cfg(feature = "gpu")]
+    if os_wasm_probe::gpu::env_enabled() {
+        let started = Instant::now();
+        match os_wasm_probe::gpu::set_gpu(true) {
+            Ok(adapter) => println!(
+                "GPU commitment on {} (ready in {:.2} s)",
+                adapter.unwrap_or_default(),
+                started.elapsed().as_secs_f64()
+            ),
+            Err(error) => println!("GPU commitment unavailable, on the CPU: {error}"),
+        }
+    }
 }
 
 /// A session driven only through the C interface, as the apps drive it.
@@ -148,7 +187,15 @@ fn take(answer: *mut c_char) -> String {
     text
 }
 
-fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>) {
+fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>, gpu: bool) {
+    // --gpu: the GPU through the C entry point, as an app turns it on. Without it, OUTIS_GPU=1
+    // turns it on at the proof, as for an app that sets the environment.
+    if gpu {
+        #[cfg(feature = "gpu")]
+        println!("tx_prove_set_gpu(1): {}", take(os_wasm_probe::native::tx_prove_set_gpu(1)));
+        #[cfg(not(feature = "gpu"))]
+        panic!("--gpu: built without the gpu feature");
+    }
     let recording = Recording::open(capture);
     let (header, transaction) = (recording.header(), recording.transaction());
 

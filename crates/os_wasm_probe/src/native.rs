@@ -271,6 +271,24 @@ pub unsafe extern "C" fn tx_session_close(session: *mut TxNativeSession) {
     }));
 }
 
+/// Turns the GPU commitment on (`enabled` not 0) or off for every proof from now on, in this
+/// process (see `gpu`; only in a library built with the `gpu` feature). Off by default, unless
+/// `OUTIS_GPU=1` is in the environment at the first proof and this was not called. Returns
+/// `{"ok": adapter}` when on (e.g. "NVIDIA GeForce RTX 3080 (Vulkan)"), `{"ok": null}` when off, or
+/// `{"error": message}` when there is no GPU to use (the proofs then stay on the CPU). The first
+/// call that turns it on creates the device and compiles the kernels, which can take a second.
+/// Free the answer with `tx_prove_free`.
+#[cfg(feature = "gpu")]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu(enabled: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| match crate::gpu::set_gpu(enabled != 0) {
+        Ok(adapter) => json!({ "ok": adapter }),
+        Err(message) => json!({ "error": message }),
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
 /// A C string argument as UTF-8.
 unsafe fn argument<'a>(pointer: *const c_char, name: &str) -> Result<&'a str, String> {
     if pointer.is_null() {
