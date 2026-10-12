@@ -3938,6 +3938,7 @@ dependencies = [
  "starknet_patricia_storage",
  "starknet_proof_verifier",
  "stwo",
+ "stwo-constraint-framework",
  "stwo-gpu-bridge",
  "stwo-gpu-spike",
  "thiserror 1.0.69",

@@ -21,6 +21,7 @@ starknet_proof_verifier = { git = "https://github.com/outis-wallet/sequencer", r
 # The prover, as the sequencer depends on it; [patch] below swaps in the fork.
 privacy-prove = { git = "https://github.com/starkware-libs/proving", rev = "2b495a36d57a4bd754cdfa1c2b5bda8d92b37ec3" }
 stwo = { git = "https://github.com/starkware-libs/proving", rev = "2b495a36d57a4bd754cdfa1c2b5bda8d92b37ec3" }
+stwo-constraint-framework = { git = "https://github.com/starkware-libs/proving", rev = "2b495a36d57a4bd754cdfa1c2b5bda8d92b37ec3" }
 # The striped commitment on a GPU (the prover's `gpu` feature), from the fork: natively through
 # wgpu, and in browsers the bridge to a page's WebGPU worker (no dependencies).
 stwo-gpu-spike = { git = "https://github.com/outis-wallet/proving", rev = "207fb54b1e4cb0910758724cd32c0f3e0ad4f0ae" }

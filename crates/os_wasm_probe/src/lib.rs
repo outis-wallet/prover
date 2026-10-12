@@ -609,6 +609,9 @@ impl TxSession {
         // With the `gpu` feature, OUTIS_GPU=1 turns the GPU commitment on (unless set already).
         #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
         crate::gpu::apply_env();
+        // Nothing an earlier (e.g. cancelled) proof's commitments kept for its part extension.
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        crate::gpu::proof_starts();
         // One proof per session: each leg's precomputes go when the leg ends, and none outlive
         // the proof. Natively, the session's cancel flag stops it between steps.
         #[cfg(target_arch = "wasm32")]

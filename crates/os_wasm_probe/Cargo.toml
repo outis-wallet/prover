@@ -46,6 +46,8 @@ stwo = { workspace = true, features = ["prover"], optional = true }
 rayon = "1.11"
 # `gpu`: the GPU's commitment (wgpu), natively (src/gpu/native.rs).
 stwo-gpu-spike = { workspace = true, optional = true }
+# `gpu`: constraint evaluation's part-extension hook (src/gpu/native.rs, STWO_GPU_PARTS).
+stwo-constraint-framework = { workspace = true, features = ["prover"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # A rayon thread pool on Web Workers sharing the module's memory; rayon itself for stop_threads.
@@ -68,4 +70,4 @@ threads = ["dep:wasm-bindgen-rayon", "dep:parking_lot_core", "dep:rayon"]
 # The striped commitments on a GPU (src/gpu.rs), for the target built: natively on the machine's
 # GPU through wgpu (Vulkan, Metal, DX12; stwo-gpu-spike), when turned on; on wasm32, the threaded
 # build, on the page's WebGPU worker when one is attached (through stwo-gpu-bridge).
-gpu = ["threads", "dep:stwo", "dep:stwo-gpu-spike", "dep:stwo-gpu-bridge"]
+gpu = ["threads", "dep:stwo", "dep:stwo-gpu-spike", "dep:stwo-gpu-bridge", "dep:stwo-constraint-framework"]

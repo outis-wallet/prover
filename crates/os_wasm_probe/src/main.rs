@@ -98,6 +98,43 @@ fn replay(capture: &Path, out: Option<&Path>) {
             commitment.seconds,
         );
     }
+    #[cfg(feature = "gpu")]
+    if let Some((stats, check)) = os_wasm_probe::gpu::take_part_stats() {
+        if stats.requests > 0 {
+            println!(
+                "parts: {} requests, {} columns: {} hits ({} MiB, {} copied), {} misses, {} mismatches; \
+                 kept {} MiB, held at most {} MiB; lookups {:.3} s, transfers {:.3} s",
+                stats.requests,
+                stats.columns,
+                stats.hits,
+                stats.hit_bytes >> 20,
+                stats.copies,
+                stats.misses,
+                stats.mismatches,
+                stats.kept_bytes >> 20,
+                stats.max_held_bytes >> 20,
+                stats.lookup.as_secs_f64(),
+                stats.transfer.as_secs_f64(),
+            );
+        }
+        if stats.readback_wait + stats.readback_copy > std::time::Duration::ZERO {
+            println!(
+                "parts readback: wait {:.3} s, copy {:.3} s",
+                stats.readback_wait.as_secs_f64(),
+                stats.readback_copy.as_secs_f64()
+            );
+        }
+        if stats.recompute.bytes > 0 {
+            println!(
+                "parts recompute: {:?}; GPU memory kept {} MiB",
+                stats.recompute,
+                stats.recompute_bytes >> 20
+            );
+        }
+        if check.columns + check.declined > 0 {
+            println!("parts check: {check:?}");
+        }
+    }
     let footprint = report.peak.footprint_mib.map_or(String::new(), |mib| format!(", peak footprint {mib} MiB"));
     let proof_kib = report.proof_bytes / 1024;
     println!(
