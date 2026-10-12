@@ -3,7 +3,7 @@
 //! `verify <response.json>`: verifies a starknet_proveTransaction result.
 //! `replay <capture dir> [out.json]`: the whole TxSession pipeline on a recording made by
 //! rpc-record-proxy.py (as replay.mjs does in Node), with timings, peak memory and a comparison
-//! with the native prover's response.
+//! with the native prover's response. One thread per physical core, unless RAYON_NUM_THREADS.
 //! `ffi <capture dir> [--threads N] [--cancel-after S]`: the same through the C interface the apps
 //! link (include/outis_prover.h), proved and verified; with --cancel-after, the prove is cancelled
 //! S seconds in and the time it takes to return is measured.
@@ -56,6 +56,13 @@ fn main() {
 }
 
 fn replay(capture: &Path, out: Option<&Path>) {
+    // One thread per physical core, as the C entry points do, unless RAYON_NUM_THREADS says.
+    if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(os_wasm_probe::native::default_threads())
+            .build_global()
+            .expect("thread pool");
+    }
     let report = os_wasm_probe::replay::replay(capture, &|event| match event {
         Progress::Transaction { block, tx_hash } => println!("block {block}, tx {tx_hash}"),
         Progress::Note { message } => println!("{message}"),

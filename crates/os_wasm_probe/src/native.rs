@@ -104,8 +104,63 @@ fn dispatch(session: &mut TxSession, method: &str, args: &[Value]) -> Result<Val
     })
 }
 
+/// The thread count of a pool whose caller asks for 0: one per physical core. Hyperthreads don't
+/// speed the proof up: on an 18-core, 36-thread x86-64 machine, 36 threads proved no faster than
+/// 18, and the extra idle threads spent seconds of system time spinning in `sched_yield`. Phones
+/// have one thread per core, so there it is one per core as before. Never more than the threads
+/// the process may run on (its affinity, a cgroup's quota).
+pub fn default_threads() -> usize {
+    let available = std::thread::available_parallelism().map_or(1, |threads| threads.get());
+    physical_cores().map_or(available, |cores| cores.clamp(1, available))
+}
+
+/// The physical cores: the distinct sets of hardware threads that share a core, among the online
+/// CPUs (an offline CPU has no topology directory).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn physical_cores() -> Option<usize> {
+    let mut cores = std::collections::HashSet::new();
+    for entry in std::fs::read_dir("/sys/devices/system/cpu").ok()?.flatten() {
+        let name = entry.file_name();
+        let is_cpu = name.to_str().and_then(|name| name.strip_prefix("cpu")).is_some_and(|index| {
+            !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+        });
+        if !is_cpu {
+            continue;
+        }
+        if let Ok(siblings) = std::fs::read_to_string(entry.path().join("topology/thread_siblings_list")) {
+            cores.insert(siblings.trim().to_owned());
+        }
+    }
+    (!cores.is_empty()).then_some(cores.len())
+}
+
+/// The physical cores (`hw.physicalcpu`).
+#[cfg(target_vendor = "apple")]
+fn physical_cores() -> Option<usize> {
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const c_char,
+            old: *mut std::ffi::c_void,
+            old_len: *mut usize,
+            new: *mut std::ffi::c_void,
+            new_len: usize,
+        ) -> std::ffi::c_int;
+    }
+    let mut cores: i32 = 0;
+    let mut size = size_of::<i32>();
+    let read = unsafe {
+        sysctlbyname(c"hw.physicalcpu".as_ptr(), (&raw mut cores).cast(), &mut size, std::ptr::null_mut(), 0)
+    };
+    (read == 0 && cores > 0).then_some(cores as usize)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+fn physical_cores() -> Option<usize> {
+    None
+}
+
 /// Opens a session for one transaction (see `TxSession::new`) on a rayon pool of `threads`
-/// threads (0: one per core) with 16 MiB stacks: a call runs wholly on a pool thread, not just
+/// threads (0: one per physical core, see [`default_threads`]) with 16 MiB stacks: a call runs wholly on a pool thread, not just
 /// its parallel parts, so the threads get a main thread's stack (as the wasm build's
 /// -zstack-size) instead of rayon's 2 MiB. Returns null on failure and, if `error` is not null,
 /// sets `*error` to the message (free it with `tx_prove_free`); on success sets `*error` to null.
@@ -129,7 +184,7 @@ pub unsafe extern "C" fn tx_session_open(
         let cancel = Arc::new(AtomicBool::new(false));
         session.set_cancel_flag(cancel.clone());
         let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads as usize)
+            .num_threads(if threads == 0 { default_threads() } else { threads as usize })
             .stack_size(16 << 20)
             .thread_name(|index| format!("outis-prover-{index}"))
             .build()

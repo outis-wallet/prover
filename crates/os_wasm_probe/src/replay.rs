@@ -301,7 +301,7 @@ struct ProgressTarget {
 unsafe impl Sync for ProgressTarget {}
 
 /// C entry point (the iOS app): replays the capture in the directory `capture_dir` on a pool of
-/// `threads` threads (0: one per core) and returns the [`Report`] as pretty JSON, or
+/// `threads` threads (0: one per physical core, see [`crate::native::default_threads`]) and returns the [`Report`] as pretty JSON, or
 /// `{"error": ...}`. `progress` (may be null) gets the [`Progress`] events. Free the result with
 /// [`tx_prove_free`].
 ///
@@ -328,7 +328,7 @@ pub unsafe extern "C" fn tx_prove_replay(
         // install() runs the whole pipeline on a pool thread, not just the parallel parts: give the
         // threads a main thread's stack (as the wasm build's -zstack-size) instead of 2 MiB.
         let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads as usize)
+            .num_threads(if threads == 0 { crate::native::default_threads() } else { threads as usize })
             .stack_size(16 << 20)
             .build()
             .expect("thread pool");
