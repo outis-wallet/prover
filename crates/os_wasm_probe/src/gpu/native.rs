@@ -308,6 +308,13 @@ fn apply_decommit(committer: &Arc<GpuCommitter>) {
     if mode == Decommit::Off {
         set_striped_decommit_hook::<SimdBackend>(None);
         committer.set_decommit(false);
+        // Nothing keeps the coefficients any more unless the composition reads them.
+        if composition() == Composition::Off
+            && matches!(committer.parts_mode(), PartsMode::Resident | PartsMode::Coefficients)
+        {
+            committer.set_parts_mode(PartsMode::from_env());
+            committer.clear_parts();
+        }
         apply_ood(committer);
         return;
     }
@@ -650,6 +657,90 @@ fn hook(committer: Arc<GpuCommitter>) -> Arc<StripedCommitHook<SimdBackend, Blak
         drop(commitments);
         result
     })
+}
+
+/// Whether the proofs use a GPU hook beyond the commitment (composition, decommitment or
+/// out-of-domain samples, in any mode but off): then the prover verifies its own proof before
+/// returning it, and proves again without them if that fails (see `TxSession::prove`).
+/// `OUTIS_GPU_SELF_VERIFY=0` turns that off, for tests of what the hooks' faults do to a proof.
+pub fn self_verify_needed() -> bool {
+    let gpu_on = *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let off_for_tests = std::env::var("OUTIS_GPU_SELF_VERIFY").is_ok_and(|v| v == "0");
+    gpu_on
+        && !off_for_tests
+        && matches!(COMMITTER.get(), Some(Ok(_)))
+        && (composition() != Composition::Off || decommit() != Decommit::Off || ood() != Ood::Off)
+}
+
+/// The modes [`suspend_hooks`] turned off, put back when dropped.
+pub struct HooksSuspended {
+    composition: Option<Composition>,
+    decommit: Option<Decommit>,
+    ood: Option<Ood>,
+}
+
+/// Turns the GPU hooks beyond the commitment (composition, decommitment, out-of-domain samples)
+/// off until the guard drops; then they are as they were (the modes set, or the environment's).
+pub fn suspend_hooks() -> HooksSuspended {
+    fn get<T: Copy>(mode: &Mutex<Option<T>>) -> Option<T> {
+        *mode.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+    let saved = HooksSuspended {
+        composition: get(&COMPOSITION),
+        decommit: get(&DECOMMIT),
+        ood: get(&OOD),
+    };
+    set_ood(Ood::Off);
+    set_decommit(Decommit::Off);
+    set_composition(Composition::Off);
+    saved
+}
+
+impl Drop for HooksSuspended {
+    fn drop(&mut self) {
+        *COMPOSITION.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.composition;
+        *DECOMMIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.decommit;
+        *OOD.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = self.ood;
+        let gpu_on = *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let (true, Some(Ok(committer))) = (gpu_on, COMMITTER.get()) {
+            // As `apply` does: the composition, then the decommitment (and the samples).
+            if composition() != Composition::Off {
+                apply_composition(committer);
+            }
+            apply_decommit(committer);
+        }
+        tracing::info!(
+            "GPU hooks back: composition {:?}, decommitment {:?}, out-of-domain samples {:?}",
+            composition(),
+            decommit(),
+            ood()
+        );
+    }
+}
+
+/// A proof's self-verification (see `TxSession::prove`).
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct SelfVerify {
+    /// Whether the proof returned verified (the retry's, if there was one).
+    pub verified: bool,
+    /// Why the first proof was proved again with the hooks off: it failed verification, or the
+    /// prover failed; `None` if it verified.
+    pub retried: Option<String>,
+    /// The verifications' time, and the retry's (its proof and verification).
+    pub verify_s: f64,
+    pub retry_s: f64,
+}
+
+/// The last proof's self-verification, until taken.
+static SELF_VERIFY: Mutex<Option<SelfVerify>> = Mutex::new(None);
+
+pub fn record_self_verify(report: SelfVerify) {
+    *SELF_VERIFY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(report);
+}
+
+/// The last proof's self-verification since the last call (`None` if it had none).
+pub fn take_self_verify() -> Option<SelfVerify> {
+    SELF_VERIFY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take()
 }
 
 /// Drops what the committer kept of an earlier proof's trees for the part extension (a proof

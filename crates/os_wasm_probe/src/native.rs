@@ -46,11 +46,20 @@ impl TxNativeSession {
             return cancelled("cancelled");
         }
         let session = &mut *session;
-        match self.pool.install(|| dispatch(session, method, &args)) {
+        let mut answer = match self.pool.install(|| dispatch(session, method, &args)) {
             Ok(value) => json!({ "ok": value }),
             Err(message) if self.cancelled() => cancelled(&message),
             Err(message) => json!({ "error": message }),
+        };
+        // A proof made with GPU hooks beyond the commitment was verified before it was returned
+        // (and proved again without them if it failed): how, beside its answer.
+        #[cfg(feature = "gpu")]
+        if method == "prove"
+            && let Some(report) = crate::gpu::take_self_verify()
+        {
+            answer["gpu_self_verify"] = json!(report);
         }
+        answer
     }
 }
 

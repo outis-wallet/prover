@@ -612,17 +612,35 @@ impl TxSession {
         // Nothing an earlier (e.g. cancelled) proof's commitments kept for its part extension.
         #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
         crate::gpu::proof_starts();
+        // With a GPU hook beyond the commitment, the proof is verified before it is returned, and
+        // proved again without those hooks if it fails: the run is kept for that.
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        let retry_pie = crate::gpu::self_verify_needed().then(|| pie.clone());
         // One proof per session: each leg's precomputes go when the leg ends, and none outlive
         // the proof. Natively, the session's cancel flag stops it between steps.
         #[cfg(target_arch = "wasm32")]
         let output = privacy_prove::privacy_recursive_prove_once(pie);
         #[cfg(not(target_arch = "wasm32"))]
         let output = privacy_prove::privacy_recursive_prove_once_stoppable(pie, &self.cancel);
-        let output = output.map_err(|e| fail(&format!("prover: {e}")))?;
-        let proof = Proof::from(output.proof);
-        let proof_facts = ProgramOutput::from(output.output_preimage)
-            .try_into_proof_facts(VIRTUAL_SNOS)
-            .map_err(js_error)?;
+        let result = self.prove_result(output.map(|output| {
+            (Proof::from(output.proof), ProgramOutput::from(output.output_preimage))
+        }));
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        if let Some(pie) = retry_pie {
+            return self.verified_or_proved_again(result, pie);
+        }
+        result
+    }
+}
+
+impl TxSession {
+    /// The `starknet_proveTransaction` result JSON of a proof.
+    fn prove_result(
+        &self,
+        output: Result<(Proof, ProgramOutput), Box<dyn std::error::Error>>,
+    ) -> Result<String, Failure> {
+        let (proof, output) = output.map_err(|e| fail(&format!("prover: {e}")))?;
+        let proof_facts = output.try_into_proof_facts(VIRTUAL_SNOS).map_err(js_error)?;
         Ok(serde_json::json!({
             "proof": proof,
             "proof_facts": proof_facts,
@@ -630,9 +648,61 @@ impl TxSession {
         })
         .to_string())
     }
-}
 
-impl TxSession {
+    /// `result`, a proof made with GPU hooks beyond the commitment, if it verifies; otherwise
+    /// (or if the prover failed) the proof of `pie` made again with those hooks off, verified
+    /// too. Never a proof that doesn't verify. Recorded for `gpu::take_self_verify`.
+    #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+    fn verified_or_proved_again(
+        &self,
+        result: Result<String, Failure>,
+        pie: CairoPie,
+    ) -> Result<String, Failure> {
+        let verify = |json: &str| {
+            let _span = tracing::span!(tracing::Level::INFO, "Self-verification").entered();
+            verify_result(json)
+        };
+        let started = std::time::Instant::now();
+        let failure = match &result {
+            Ok(json) => verify(json).err().map(|e| format!("the proof failed verification: {e}")),
+            // A cancelled proof isn't proved again.
+            Err(_) if self.cancel.load(Ordering::Relaxed) => return result,
+            Err(e) => Some(format!("the prover failed: {}", e.0)),
+        };
+        let mut report =
+            crate::gpu::SelfVerify { verify_s: started.elapsed().as_secs_f64(), ..Default::default() };
+        let Some(reason) = failure else {
+            report.verified = true;
+            crate::gpu::record_self_verify(report);
+            return result;
+        };
+        let message = format!(
+            "GPU SELF-VERIFICATION FAILED: {reason}; proving again with the GPU's composition, \
+             decommitment and out-of-domain samples off"
+        );
+        tracing::error!("{message}");
+        eprintln!("{message}");
+        let retry_started = std::time::Instant::now();
+        let retried = {
+            let _suspended = crate::gpu::suspend_hooks();
+            crate::gpu::proof_starts();
+            let output = privacy_prove::privacy_recursive_prove_once_stoppable(pie, &self.cancel);
+            self.prove_result(output.map(|output| {
+                (Proof::from(output.proof), ProgramOutput::from(output.output_preimage))
+            }))
+        };
+        let verified = retried.as_ref().map(|json| verify(json));
+        report.retry_s = retry_started.elapsed().as_secs_f64();
+        report.retried = Some(reason);
+        report.verified = matches!(verified, Ok(Ok(())));
+        crate::gpu::record_self_verify(report);
+        match verified {
+            Ok(Ok(())) => retried,
+            Ok(Err(e)) => Err(fail(&format!("the proof failed verification, also proved again: {e}"))),
+            Err(_) => retried,
+        }
+    }
+
     /// Cairo steps of the virtual OS run, once `run_os` ran (until `prove` takes the run).
     pub fn os_steps(&self) -> Option<usize> {
         self.pie.as_ref().map(|pie| pie.execution_resources.n_steps)

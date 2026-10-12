@@ -34,7 +34,7 @@ fn main() {
     }
     let usage = "usage: os_native_probe os <input.json> | verify <response.json> | replay <capture dir> [out.json] \
                  | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu] [--keep-warm MS] \
-                 [--composition 0|1|2]";
+                 [--composition 0|1|2] [--decommit 0|1|2] [--ood 0|1|2]";
     let option = |name: &str| {
         args.iter().position(|arg| arg == name).map(|index| args[index + 1].parse::<f64>().expect(name))
     };
@@ -62,6 +62,8 @@ fn main() {
             args.iter().any(|arg| arg == "--gpu"),
             option("--keep-warm").map(|ms| ms as u32),
             option("--composition").map(|mode| mode as u32),
+            option("--decommit").map(|mode| mode as u32),
+            option("--ood").map(|mode| mode as u32),
         ),
         _ => panic!("{usage}"),
     }
@@ -121,6 +123,18 @@ fn replay(capture: &Path, out: Option<&Path>) {
                     stats.times.plan, stats.times.setup, stats.times.gpu, stats.times.finish,
                 );
             }
+        }
+        #[cfg(feature = "gpu")]
+        if let Some(report) = os_wasm_probe::gpu::take_self_verify() {
+            println!(
+                "proof {round}: self-verification: {}, {:.3} s; {}",
+                if report.verified { "verified" } else { "NOT VERIFIED" },
+                report.verify_s,
+                match &report.retried {
+                    Some(reason) => format!("proved again with the hooks off in {:.2} s: {reason}", report.retry_s),
+                    None => "not proved again".to_string(),
+                }
+            );
         }
         #[cfg(feature = "gpu")]
         if let Some((stats, (compared, different))) = os_wasm_probe::gpu::take_ood_stats() {
@@ -335,6 +349,8 @@ fn ffi(
     gpu: bool,
     keep_warm: Option<u32>,
     composition: Option<u32>,
+    decommit: Option<u32>,
+    ood: Option<u32>,
 ) {
     // --gpu: the GPU through the C entry point, as an app turns it on. Without it, OUTIS_GPU=1
     // turns it on at the proof, as for an app that sets the environment.
@@ -358,6 +374,23 @@ fn ffi(
         );
         #[cfg(not(feature = "gpu"))]
         panic!("--composition {mode}: built without the gpu feature");
+    }
+    // --decommit N, --ood N: the decommitment and the out-of-domain samples on the GPU, the same
+    // way.
+    if let Some(mode) = decommit {
+        #[cfg(feature = "gpu")]
+        println!(
+            "tx_prove_set_gpu_decommit({mode}): {}",
+            take(os_wasm_probe::native::tx_prove_set_gpu_decommit(mode))
+        );
+        #[cfg(not(feature = "gpu"))]
+        panic!("--decommit {mode}: built without the gpu feature");
+    }
+    if let Some(mode) = ood {
+        #[cfg(feature = "gpu")]
+        println!("tx_prove_set_gpu_ood({mode}): {}", take(os_wasm_probe::native::tx_prove_set_gpu_ood(mode)));
+        #[cfg(not(feature = "gpu"))]
+        panic!("--ood {mode}: built without the gpu feature");
     }
     if gpu {
         #[cfg(feature = "gpu")]
@@ -416,8 +449,13 @@ fn ffi(
 
     let Some(cancel_after) = cancel_after else {
         let prove_started = Instant::now();
-        let result_json = session.call_string("prove", json!([]));
+        let answer = session.answer("prove", json!([]));
         let prove_s = prove_started.elapsed().as_secs_f64();
+        // With GPU hooks beyond the commitment, how the proof was verified before it was returned.
+        if let Some(report) = answer.get("gpu_self_verify") {
+            println!("prove's gpu_self_verify: {report}");
+        }
+        let result_json = answer["ok"].as_str().unwrap_or_else(|| panic!("prove: {answer}")).to_string();
         let result: Value = serde_json::from_str(&result_json).unwrap();
         let same = identical(&result, &recording.native_result());
         let verify_started = Instant::now();
