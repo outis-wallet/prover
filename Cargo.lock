@@ -5848,6 +5848,7 @@ name = "stwo-gpu-spike"
 version = "0.1.0"
 source = "git+https://github.com/outis-wallet/proving?rev=207fb54b1e4cb0910758724cd32c0f3e0ad4f0ae#207fb54b1e4cb0910758724cd32c0f3e0ad4f0ae"
 dependencies = [
+ "ash",
  "bytemuck",
  "itertools 0.12.1",
  "pollster",

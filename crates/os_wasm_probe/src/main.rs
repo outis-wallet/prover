@@ -105,6 +105,10 @@ fn replay(capture: &Path, out: Option<&Path>) {
             );
         }
         #[cfg(feature = "gpu")]
+        if let Some(report) = os_wasm_probe::gpu::vram_report() {
+            println!("proof {round}: video memory after: {report}");
+        }
+        #[cfg(feature = "gpu")]
         if let Some((stats, (ready, compiling, failed))) = os_wasm_probe::gpu::take_composition_stats() {
             println!(
                 "proof {round}: {}; kernels ready {ready}, compiling {compiling}, failed {failed}",
@@ -154,6 +158,34 @@ fn replay(capture: &Path, out: Option<&Path>) {
                 stats.transfer.as_secs_f64(),
             );
         }
+        if !stats.trees.is_empty() {
+            let trees: Vec<String> = stats
+                .trees
+                .iter()
+                .map(|(bytes, both, kept, reserved)| {
+                    format!(
+                        "{} MiB {} {} (holding {})",
+                        bytes >> 20,
+                        if *both { "both stripes" } else { "stripe 1" },
+                        if *kept { "kept" } else { "NOT kept" },
+                        reserved >> 20
+                    )
+                })
+                .collect();
+            println!("parts trees offered: {}", trees.join("; "));
+        }
+        if stats.over_budget > 0 {
+            println!(
+                "parts not kept (video memory): {} trees (cap {}, process share {}, driver budget {}), \
+                 resident hits {}, misses {}",
+                stats.over_budget,
+                stats.refused_cap,
+                stats.refused_share,
+                stats.refused_driver_budget,
+                stats.resident_hits,
+                stats.resident_misses,
+            );
+        }
         if stats.readback_wait + stats.readback_copy > std::time::Duration::ZERO {
             println!(
                 "parts readback: wait {:.3} s, copy {:.3} s",
@@ -197,11 +229,16 @@ fn gpu_from_env() {
     if os_wasm_probe::gpu::env_enabled() {
         let started = Instant::now();
         match os_wasm_probe::gpu::set_gpu(true) {
-            Ok(adapter) => println!(
-                "GPU commitment on {} (ready in {:.2} s)",
-                adapter.unwrap_or_default(),
-                started.elapsed().as_secs_f64()
-            ),
+            Ok(adapter) => {
+                println!(
+                    "GPU commitment on {} (ready in {:.2} s)",
+                    adapter.unwrap_or_default(),
+                    started.elapsed().as_secs_f64()
+                );
+                if let Some(report) = os_wasm_probe::gpu::vram_report() {
+                    println!("video memory: {report}");
+                }
+            }
             Err(error) => println!("GPU commitment unavailable, on the CPU: {error}"),
         }
     }

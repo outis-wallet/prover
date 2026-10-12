@@ -179,13 +179,40 @@ pub fn wait_composition_compiled(timeout: Duration) -> bool {
     COMPOSER.get().is_none_or(|composer| composer.wait_compiled(timeout))
 }
 
-/// The most GPU memory the commitments keep for the composition: `OUTIS_GPU_COMPOSITION_VRAM_MIB`,
-/// else 4 GiB (a leg's resident columns take about 2.1 GiB in the privacy proofs).
-fn composition_budget() -> u64 {
-    std::env::var("OUTIS_GPU_COMPOSITION_VRAM_MIB")
-        .ok()
-        .and_then(|mib| mib.parse::<u64>().ok())
-        .map_or(4 << 30, |mib| mib << 20)
+/// The device's video memory and this process's bound on it, e.g. "device-local 10240 MiB,
+/// driver budget 9500 MiB (using 1200), process bound 4096 MiB (40%), holding 1100 MiB"; `None`
+/// without a committer.
+pub fn vram_report() -> Option<String> {
+    let Some(Ok(committer)) = COMMITTER.get() else { return None };
+    let (memory, reserved, bound) = committer.vram_report();
+    let mib = |bytes: u64| bytes >> 20;
+    let policy = committer.vram_policy();
+    let mut report = match memory {
+        Some(memory) => format!("device-local {} MiB", mib(memory.local_heap)),
+        None => "device memory unknown".to_string(),
+    };
+    if let Some(memory) = memory {
+        if let (Some(budget), Some(usage)) = (memory.budget, memory.usage) {
+            report += &format!(", driver budget {} MiB (using {})", mib(budget), mib(usage));
+        }
+    }
+    report += &format!(", process bound {} MiB ({}%)", mib(bound), policy.process_percent);
+    if let Some(cap) = policy.cap {
+        report += &format!(", composition cap {} MiB", mib(cap));
+    }
+    if let Some(reserved) = reserved {
+        report += &format!(", holding {} MiB", mib(reserved));
+    }
+    let held = committer.held_bytes();
+    report += &format!(
+        " (commitment buffers {} MiB, twiddles {}, upload ring {}, readback ring {}; parts {})",
+        mib(held.buffers),
+        mib(held.twiddles),
+        mib(held.upload),
+        mib(held.readback),
+        mib(committer.parts_held_bytes()),
+    );
+    Some(report)
 }
 
 /// Registers (or removes) the composition's hooks as [`composition`] says, on `committer`.
@@ -204,8 +231,11 @@ fn apply_composition(committer: &Arc<GpuCommitter>) {
     }
     // The columns stay resident on the GPU (stripes 0 and 1), within the budget; stripe 1 serves
     // the components the CPU evaluates.
+    // (The video memory they take is bounded by the committer's policy: by default the whole
+    // process at most 40% of the device, OUTIS_GPU_PROCESS_VRAM_PERCENT, and
+    // OUTIS_GPU_COMPOSITION_VRAM_MIB on what is kept; past it a tree isn't kept and its
+    // components are evaluated on the CPU.)
     committer.set_parts_mode(PartsMode::Resident);
-    committer.set_parts_budget(Some(composition_budget()));
     set_trace_part_hook(Some(part_hook(committer.clone())));
     let only = std::env::var("OUTIS_GPU_COMPOSITION_ONLY")
         .map(|o| o.split(',').filter(|s| !s.is_empty()).map(str::to_owned).collect())
