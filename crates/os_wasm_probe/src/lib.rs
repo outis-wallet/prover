@@ -5,7 +5,7 @@
 mod committer_utils;
 mod errors;
 mod executor;
-#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+#[cfg(feature = "gpu")]
 pub mod gpu;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
