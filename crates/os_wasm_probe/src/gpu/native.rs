@@ -32,7 +32,10 @@ use stwo::core::poly::circle::CanonicCoset;
 use stwo::core::vcs_lifted::blake2_merkle::Blake2sM31MerkleChannel;
 use stwo::prover::backend::simd::SimdBackend;
 use stwo::prover::poly::circle::{part_domain, PolyOps};
-use stwo::prover::{set_striped_commit_hook, Poly, StripedCommitHook};
+use stwo::core::fields::m31::BaseField;
+use stwo::prover::poly::BitReversedOrder;
+use stwo::prover::poly::circle::CircleEvaluation;
+use stwo::prover::{set_striped_commit_hook, set_striped_decommit_hook, Poly, StripedCommitHook};
 use stwo_constraint_framework::{set_trace_part_hook, TracePartHook, TracePartRequest};
 use stwo_constraint_framework::constraint_hook::set_constraint_eval_hook;
 use stwo_gpu_spike::committer::{Declined, GpuCommitter};
@@ -215,12 +218,138 @@ pub fn vram_report() -> Option<String> {
     Some(report)
 }
 
+/// What the commitments keep resident for the GPU's constraint evaluation (and decommitment):
+/// the columns' coefficients (the default), or `OUTIS_GPU_RESIDENT=stripes`, their stripes 0 and 1.
+fn resident_mode() -> PartsMode {
+    match std::env::var("OUTIS_GPU_RESIDENT").as_deref() {
+        Ok("stripes") => PartsMode::Resident,
+        _ => PartsMode::Coefficients,
+    }
+}
+
+/// The decommitment on the GPU (stwo's striped decommitment hook, see stwo-gpu-spike's
+/// `decommit`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decommit {
+    Off,
+    /// The opened values the tree's columns don't hold are evaluated on the GPU from the
+    /// coefficients the commitments keep.
+    On,
+    /// Evaluated on the GPU and on the CPU, compared; the CPU's values are used.
+    Shadow,
+}
+
+/// The decommitment mode [`set_decommit`] set (`None` until called: the environment's).
+static DECOMMIT: Mutex<Option<Decommit>> = Mutex::new(None);
+/// Shadow mode's counts: (columns compared, values that differ).
+static DECOMMIT_SHADOW: Mutex<(u64, u64)> = Mutex::new((0, 0));
+
+/// The decommitment mode: [`set_decommit`]'s, else `OUTIS_GPU_DECOMMIT` (`1`, `on`, `true`;
+/// `shadow`), else off.
+pub fn decommit() -> Decommit {
+    if let Some(mode) = *DECOMMIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+        return mode;
+    }
+    match std::env::var("OUTIS_GPU_DECOMMIT").unwrap_or_default().to_ascii_lowercase().as_str() {
+        "1" | "on" | "true" => Decommit::On,
+        "shadow" => Decommit::Shadow,
+        _ => Decommit::Off,
+    }
+}
+
+/// Sets the decommitment mode for the proofs from now on (off by default), with the GPU on; the
+/// commitments then keep their columns' coefficients until their decommitment. Takes effect now
+/// if the GPU is on, otherwise when it is turned on.
+pub fn set_decommit(mode: Decommit) {
+    *DECOMMIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(mode);
+    let gpu_on = *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let (true, Some(Ok(committer))) = (gpu_on, COMMITTER.get()) {
+        apply_decommit(committer);
+    }
+    tracing::info!("GPU decommitment: {mode:?}");
+}
+
+/// The decommitments' counts since the last call, and shadow mode's (columns compared, values
+/// that differ).
+pub fn take_decommit_stats() -> Option<(stwo_gpu_spike::committer::DecommitStats, (u64, u64))> {
+    let Some(Ok(committer)) = COMMITTER.get() else { return None };
+    let shadow = std::mem::take(&mut *DECOMMIT_SHADOW.lock().unwrap_or_else(|p| p.into_inner()));
+    Some((committer.take_decommit_stats(), shadow))
+}
+
+/// The CPU's values of the decommitment (as stwo's `decommit_from_stripes` computes them).
+fn cpu_decommit_values(
+    columns: &[&CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>],
+    wanted: &[Vec<usize>],
+) -> Vec<Vec<BaseField>> {
+    columns
+        .iter()
+        .zip(wanted)
+        .map(|(column, wanted)| {
+            if wanted.is_empty() {
+                return vec![];
+            }
+            let poly = Poly::new(None, (*column).clone());
+            let twiddles = SimdBackend::precompute_twiddles(poly.stripe_domain().half_coset);
+            let coefficients = poly.stripe_coefficients(&twiddles);
+            SimdBackend::eval_at_domain_indices(&coefficients, column.domain, wanted)
+        })
+        .collect()
+}
+
+/// Registers (or removes) the decommitment's hook as [`decommit`] says, on `committer`.
+fn apply_decommit(committer: &Arc<GpuCommitter>) {
+    let mode = decommit();
+    if mode == Decommit::Off {
+        set_striped_decommit_hook::<SimdBackend>(None);
+        committer.set_decommit(false);
+        return;
+    }
+    // The coefficients the decommitments read (composition's mode, or set here).
+    if committer.parts_mode() != PartsMode::Coefficients {
+        committer.set_parts_mode(PartsMode::Coefficients);
+    }
+    committer.set_decommit(true);
+    let tamper = std::env::var("OUTIS_GPU_DECOMMIT_TAMPER").is_ok_and(|v| v == "1");
+    let committer = committer.clone();
+    set_striped_decommit_hook::<SimdBackend>(Some(Arc::new(move |columns, wanted| {
+        let mut values = committer.decommit_values(columns, wanted)?;
+        match mode {
+            Decommit::Shadow => {
+                let cpu = cpu_decommit_values(columns, wanted);
+                let different: u64 = cpu
+                    .iter()
+                    .zip(&values)
+                    .map(|(a, b)| {
+                        a.iter().zip(b).filter(|(x, y)| x.0 != y.0).count() as u64
+                            + a.len().abs_diff(b.len()) as u64
+                    })
+                    .sum();
+                if different > 0 {
+                    tracing::warn!("decommitment shadow: {different} values differ");
+                }
+                let mut shadow = DECOMMIT_SHADOW.lock().unwrap_or_else(|p| p.into_inner());
+                shadow.0 += wanted.iter().filter(|w| !w.is_empty()).count() as u64;
+                shadow.1 += different;
+                None
+            }
+            _ => {
+                // A test of the proof's checks: one opened value changed.
+                if tamper && let Some(first) = values.iter_mut().find(|v| !v.is_empty()) {
+                    first[0] = BaseField::from_u32_unchecked((first[0].0 + 1) % ((1 << 31) - 1));
+                }
+                Some(values)
+            }
+        }
+    })));
+}
+
 /// Registers (or removes) the composition's hooks as [`composition`] says, on `committer`.
 fn apply_composition(committer: &Arc<GpuCommitter>) {
     let mode = composition();
     if mode == Composition::Off {
         set_constraint_eval_hook(None);
-        if committer.parts_mode() == PartsMode::Resident {
+        if matches!(committer.parts_mode(), PartsMode::Resident | PartsMode::Coefficients) {
             committer.set_parts_mode(PartsMode::from_env());
             committer.clear_parts();
             if committer.parts_mode() == PartsMode::Off {
@@ -235,7 +364,7 @@ fn apply_composition(committer: &Arc<GpuCommitter>) {
     // process at most 40% of the device, OUTIS_GPU_PROCESS_VRAM_PERCENT, and
     // OUTIS_GPU_COMPOSITION_VRAM_MIB on what is kept; past it a tree isn't kept and its
     // components are evaluated on the CPU.)
-    committer.set_parts_mode(PartsMode::Resident);
+    committer.set_parts_mode(resident_mode());
     set_trace_part_hook(Some(part_hook(committer.clone())));
     let only = std::env::var("OUTIS_GPU_COMPOSITION_ONLY")
         .map(|o| o.split(',').filter(|s| !s.is_empty()).map(str::to_owned).collect())
@@ -263,6 +392,7 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
         set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(None);
         set_trace_part_hook(None);
         set_constraint_eval_hook(None);
+        set_striped_decommit_hook::<SimdBackend>(None);
         shutdown();
         tracing::info!("GPU commitment off");
         return Ok(None);
@@ -299,6 +429,10 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
     // `set_composition`): off by default.
     if composition() != Composition::Off {
         apply_composition(&committer);
+    }
+    // The decommitment on the GPU only with a mode (`OUTIS_GPU_DECOMMIT`, `set_decommit`).
+    if decommit() != Decommit::Off {
+        apply_decommit(&committer);
     }
     set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(hook(committer)));
     tracing::info!("GPU commitment on: {adapter}");

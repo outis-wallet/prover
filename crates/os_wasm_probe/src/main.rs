@@ -111,6 +111,16 @@ fn replay(capture: &Path, out: Option<&Path>) {
             println!("proof {round}: video memory after: {report}");
         }
         #[cfg(feature = "gpu")]
+        if let Some((stats, (compared, different))) = os_wasm_probe::gpu::take_decommit_stats() {
+            if stats.trees > 0 {
+                println!(
+                    "proof {round}: decommitment on the GPU: {} trees of {} ({} not resident, {} failed), \
+                     {} columns, {} values, {:.3} s; shadow {compared} columns compared, {different} values differ",
+                    stats.served, stats.trees, stats.not_resident, stats.failed, stats.columns, stats.positions, stats.seconds,
+                );
+            }
+        }
+        #[cfg(feature = "gpu")]
         if let Some((stats, (ready, compiling, failed))) = os_wasm_probe::gpu::take_composition_stats() {
             println!(
                 "proof {round}: {}; kernels ready {ready}, compiling {compiling}, failed {failed}",
@@ -164,11 +174,11 @@ fn replay(capture: &Path, out: Option<&Path>) {
             let trees: Vec<String> = stats
                 .trees
                 .iter()
-                .map(|(bytes, both, kept, reserved)| {
+                .map(|(bytes, content, kept, reserved)| {
                     format!(
-                        "{} MiB {} {} (holding {})",
+                        "{} MiB {:?} {} (holding {})",
                         bytes >> 20,
-                        if *both { "both stripes" } else { "stripe 1" },
+                        content,
                         if *kept { "kept" } else { "NOT kept" },
                         reserved >> 20
                     )
