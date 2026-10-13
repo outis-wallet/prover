@@ -8,7 +8,9 @@
 //! link (include/outis_prover.h), proved and verified; with --cancel-after, the prove is cancelled
 //! S seconds in and the time it takes to return is measured.
 //! TRACE=info (or debug, ...) prints the prover's tracing events with their times, and each span's
-//! opening and closing (with its busy and idle time).
+//! opening and closing (with its busy and idle time). REPLAY_REPEAT=N proves N times in the process;
+//! REPLAY_JSON=1 also prints the last report as one JSON line (`report-json: {...}`, for
+//! bench/run.sh).
 //! With the `gpu` feature, OUTIS_GPU=1 commits on the GPU (see the library's `gpu`), and replay
 //! lists the commitments it was asked for; `ffi --gpu` turns it on through `tx_prove_set_gpu`.
 use std::ffi::{c_char, CStr, CString};
@@ -179,6 +181,10 @@ fn replay(capture: &Path, out: Option<&Path>) {
     let report = report.expect("a proof");
     if let Some(out) = out {
         std::fs::write(out, &report.result_json).expect("write result");
+    }
+    // REPLAY_JSON=1: the report as one JSON line, at full precision (bench/run.sh reads it).
+    if std::env::var_os("REPLAY_JSON").is_some() {
+        println!("report-json: {}", serde_json::to_string(&report).expect("report"));
     }
     #[cfg(feature = "gpu")]
     for commitment in os_wasm_probe::gpu::take_commitments() {
