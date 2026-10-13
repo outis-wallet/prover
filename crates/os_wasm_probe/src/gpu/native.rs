@@ -185,6 +185,19 @@ pub fn wait_composition_compiled(timeout: Duration) -> bool {
     COMPOSER.get().is_none_or(|composer| composer.wait_compiled(timeout))
 }
 
+/// The committer's device and the limits that bound its buffers, e.g. "Apple A14 GPU (Metal): max
+/// buffer 256 MiB, max storage binding 256 MiB"; `None` without a committer.
+pub fn device_report() -> Option<String> {
+    let Some(Ok(committer)) = COMMITTER.get() else { return None };
+    let limits = committer.gpu().device.limits();
+    Some(format!(
+        "{}: max buffer {} MiB, max storage binding {} MiB",
+        describe(committer),
+        limits.max_buffer_size >> 20,
+        limits.max_storage_buffer_binding_size >> 20
+    ))
+}
+
 /// The device's video memory and this process's bound on it, e.g. "device-local 10240 MiB,
 /// driver budget 9500 MiB (using 1200), process bound 4096 MiB (40%), holding 1100 MiB"; `None`
 /// without a committer.

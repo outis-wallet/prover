@@ -325,6 +325,9 @@ pub unsafe extern "C" fn tx_prove_replay(
         }
     };
     let run = AssertUnwindSafe(|| {
+        // What an earlier proof left of the GPU's counts goes, so that the report's are this one's.
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        let _ = gpu_lines();
         // install() runs the whole pipeline on a pool thread, not just the parallel parts: give the
         // threads a main thread's stack (as the wasm build's -zstack-size) instead of 2 MiB.
         let pool = rayon::ThreadPoolBuilder::new()
@@ -333,7 +336,13 @@ pub unsafe extern "C" fn tx_prove_replay(
             .build()
             .expect("thread pool");
         let report = pool.install(|| replay(&capture, &send));
-        serde_json::to_string_pretty(&report).expect("report")
+        #[allow(unused_mut)]
+        let mut answer = serde_json::to_value(&report).expect("report");
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        {
+            answer["gpu"] = json!(gpu_lines());
+        }
+        serde_json::to_string_pretty(&answer).expect("report")
     });
     let answer = std::panic::catch_unwind(run).unwrap_or_else(|panic| {
         let message = panic
@@ -344,6 +353,77 @@ pub unsafe extern "C" fn tx_prove_replay(
         json!({ "error": message }).to_string()
     });
     CString::new(answer).expect("no NUL in JSON").into_raw()
+}
+
+/// What the GPU did in the proof since the last call, as `os_native_probe replay` prints it (a
+/// library built with the `gpu` feature): each commitment, the self-verification, the stages'
+/// counts and the video memory held. Empty with the GPU never turned on.
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+fn gpu_lines() -> Vec<String> {
+    let mut lines = vec![];
+    let commitments = crate::gpu::take_commitments();
+    if !commitments.is_empty() {
+        if let Some(device) = crate::gpu::device_report() {
+            lines.push(format!("device: {device}"));
+        }
+    }
+    for commitment in commitments {
+        lines.push(format!(
+            "commitment #{}: {} columns up to 2^{}, blowup 2^{}, lifted to 2^{}: {} {:.3} s",
+            commitment.index,
+            commitment.columns,
+            commitment.max_log_size,
+            commitment.log_blowup,
+            commitment.lifting_log_size,
+            commitment.declined.map_or("GPU".to_string(), |reason| format!("CPU ({reason}), hook")),
+            commitment.seconds,
+        ));
+    }
+    if let Some(report) = crate::gpu::take_self_verify() {
+        lines.push(format!(
+            "self-verification: {}, {:.3} s; {}",
+            if report.verified { "verified" } else { "NOT VERIFIED" },
+            report.verify_s,
+            match &report.retried {
+                Some(reason) => format!("proved again with the hooks off in {:.2} s: {reason}", report.retry_s),
+                None => "not proved again".to_string(),
+            }
+        ));
+    }
+    if let Some((stats, (ready, compiling, failed))) = crate::gpu::take_composition_stats() {
+        lines.push(format!(
+            "composition: {}; kernels ready {ready}, compiling {compiling}, failed {failed}",
+            stwo_gpu_spike::constraint::composer::describe(&stats)
+        ));
+    }
+    if let Some((stats, _)) = crate::gpu::take_decommit_stats() {
+        if stats.trees > 0 {
+            lines.push(format!(
+                "decommitment on the GPU: {} trees of {} ({} not resident, {} failed), {:.3} s",
+                stats.served, stats.trees, stats.not_resident, stats.failed, stats.seconds
+            ));
+        }
+    }
+    if let Some((stats, _)) = crate::gpu::take_ood_stats() {
+        if stats.calls > 0 {
+            lines.push(format!(
+                "out-of-domain samples on the GPU: {} columns of {} ({} not resident, {} failed), {:.3} s",
+                stats.served, stats.columns, stats.not_resident, stats.failed, stats.seconds
+            ));
+        }
+    }
+    if let Some((stats, _)) = crate::gpu::take_fri_stats() {
+        if stats.calls > 0 {
+            lines.push(format!(
+                "FRI quotients on the GPU: {} of {} ({} declined, {} refused for video memory, {} failed), {:.3} s",
+                stats.served, stats.calls, stats.declined, stats.refused_vram, stats.failed, stats.seconds
+            ));
+        }
+    }
+    if let Some(report) = crate::gpu::vram_report() {
+        lines.push(format!("video memory after: {report}"));
+    }
+    lines
 }
 
 /// Frees a string returned by [`tx_prove_replay`] or by the session functions (`native`).
