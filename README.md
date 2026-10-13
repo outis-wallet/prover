@@ -6,7 +6,7 @@ reads, runs the Starknet OS, and proves the run with StarkWare's prover. The pro
 byte-identical to the one StarkWare's transaction prover builds for the same transaction.
 
 It runs natively (a command-line replay, and a C entry point the Outis Prover apps link) and as
-WebAssembly (threaded, on Web Workers; outis.cash/prover). Status: testing. No releases yet.
+WebAssembly (threaded, on Web Workers; outis.xyz/prover). Status: testing. No releases yet.
 
 ## Layout
 
@@ -15,7 +15,7 @@ WebAssembly (threaded, on Web Workers; outis.cash/prover). Status: testing. No r
 | `crates/os_wasm_probe` | The pipeline. `TxSession` (wasm and native): the transaction's execution and storage proofs from RPC reads, the virtual OS input, the OS run, the proof. `os_native_probe`: the native command line. `native`: the C interface a wallet app proves a live transaction through (`include/outis_prover.h`): a session per transaction, called method by method with JSON as `js/tx-driver.mjs` calls the wasm one, and cancellable. `replay`: the C entry point `tx_prove_replay` with progress events, for the Outis Prover apps. |
 | `js/tx-driver.mjs` | The JavaScript side of `TxSession`: the RPC reads and the miss loop, over any async RPC, with the wasm session or an async one (an app's native session). |
 | `js/replay.mjs` | Proves a capture with the wasm build in Node. |
-| `js/worker.mjs` | The web engine's worker: proves a bundled capture in a browser and reports progress and the result (outis.cash/prover). |
+| `js/worker.mjs` | The web engine's worker: proves a bundled capture in a browser and reports progress and the result (outis.xyz/prover). |
 | `captures/` | Four Privacy Pool transactions on Starknet Sepolia (register, deposit, pay, withdraw): the recorded RPC answers, the prove request and the native prover's response, the reference for byte identity. The contract classes are in `captures/classes`, symlinked from each capture (on Windows, enable git's `core.symlinks`). |
 | `wasm-stubs/c-kzg` | An empty `c-kzg`: the C library has no wasm32 build, and the proving path never calls it. |
 | `scripts/` | `build-native.sh`, `build-wasm.sh [node\|web]`, `build-web-engine.sh <out>` (the worker, the wasm and the captures, for a page that proves in the browser), `build-android.sh` (the static library for Android apps). |
@@ -51,7 +51,7 @@ scripts/build-wasm.sh node
 node js/replay.mjs captures/pay --prove                 # the same, in wasm (single-threaded)
 
 scripts/build-wasm.sh web                               # pkg-mt/, for browsers (COOP/COEP)
-scripts/build-web-engine.sh ../outis/wallet/apps/prover/public   # outis.cash/prover's engine
+scripts/build-web-engine.sh ../outis/wallet/apps/prover/public   # outis.xyz/prover's engine
 ```
 
 The Outis Prover apps (iOS and Android) link the pipeline as a static library built from this
