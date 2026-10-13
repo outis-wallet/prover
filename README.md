@@ -6,7 +6,7 @@ reads, runs the Starknet OS, and proves the run with StarkWare's prover. The pro
 byte-identical to the one StarkWare's transaction prover builds for the same transaction.
 
 It runs natively (a command-line replay, and a C entry point the Outis Prover apps link) and as
-WebAssembly (threaded, on Web Workers; outis.xyz/prover). Status: testing. No releases yet.
+WebAssembly (threaded, on Web Workers; [outis.xyz/prover](https://outis.xyz/prover). Status: testing. No releases yet.
 
 ## Layout
 
