@@ -23,15 +23,25 @@ Pay (the others are within about 15%), prove time, peak memory. Medians of inter
 
 | device | threads | cpu | gpu | full | lean |
 |---|---|---|---|---|---|
-| Linux, i9-10980XE (18 cores) + RTX 3080 | 18 | 9.4 s, 2.7 GiB | 6.6 s, 3.0 GiB | **4.4 s**, 3.1 GiB (VRAM 3.7 GiB) | not for discrete GPUs |
+| Linux, i9-10980XE (18 cores) + RTX 3080 | 18 | 9.7 s, 2.6 GiB | 6.7 s, 2.9 GiB | **4.5 s**, 3.0 GiB (VRAM 3.7 GiB) | not for discrete GPUs |
 | macOS, Apple M5 Pro (64 GB) | 18 | 5.2 s, 2.4 GiB | 4.5 s, 3.8 GiB | **3.1 s**, 5.6 GiB | 4.8 s, 2.4 GiB |
 | macOS, Apple M5 Pro | 6 | 11.2 s, 2.36 GiB | 7.4 s, 3.8 GiB | **3.8 s**, 5.6 GiB | 7.5 s, **2.32 GiB** |
 | iPhone 12 Pro (A14, 6 GB), TxProver | 6 | 37.6 s, 2.37 GiB | | | **31.1 s, 2.14 GiB** |
 | Galaxy S25+ (Snapdragon 8 Elite, 11 GB) | 8 | 20.8 s, 2.45 GiB | 18.7 s, 4.2 GiB | | **17.6 s**, 2.99 GiB |
 | Chrome 154, RTX 3080 (16 threads, web engine) | 16 | 14.2 s | 10.9 s | | |
 
+The RTX 3080 row is `bench/results/v0.2.0/rtx3080-i9.jsonl` (bench/run.sh, 3 interleaved reps,
+the machine quiet), every capture:
+
+| capture | cpu | gpu | full |
+|---|---|---|---|
+| register | 9.81 s | 6.83 s | 4.69 s |
+| deposit | 10.64 s | 7.83 s | 5.51 s |
+| pay | 9.72 s | 6.66 s | 4.50 s |
+| withdraw | 9.57 s | 6.55 s | 4.36 s |
+
 Notes:
-- These first numbers were measured on the commits this release merged (outis-wallet/prover
+- The other rows were measured on the commits this release merged (outis-wallet/prover
   `gpu-pipeline` and `gpu-lean`, the same code), not yet with `bench/run.sh`. Its result files
   replace them per device as they are rerun.
 - The iPhone's lean runs were at thermal state serious (the CPU run's at nominal), so its gain is
