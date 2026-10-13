@@ -13,9 +13,58 @@ counted here was byte-identical to the native prover's response in the capture a
   the TxProver app's GPU panel (iOS), whose copied report is kept as the device's results.
 - **Modes**: `cpu` (no GPU); `gpu` (the striped commitments on the GPU, `OUTIS_GPU=1`); `full`
   (also composition, decommitment, out-of-domain samples and FRI quotients on the GPU); `lean` (the
-  commitments for unified memory, `STWO_GPU_LEAN=1`). Every GPU mode is off by default.
+  commitments for unified memory, `STWO_GPU_LEAN=1`). Every GPU mode is off by default. `wasm`
+  (since v0.2.1): the wasm build in Node, one thread (`scripts/build-wasm.sh node` first).
 - **Peak memory**: the process's RSS, or its physical footprint on Apple (what iOS counts against
-  an app); on Android, RSS plus the GPU driver's allocations (kgsl) at the same moment.
+  an app); on Android, RSS plus the GPU driver's allocations (kgsl) at the same moment; in the
+  wasm mode, the wasm memory (what a browser tab holds for the proof).
+
+## v0.2.1: less memory, the same time
+
+outis-wallet/proving `outis-v0.2.1`: v0.2.0's prover plus two memory cuts, both from the
+provably.fast frontier, and the browser GPU worker's build fix. Every proof stays byte-identical.
+- The Cairo components' lookup data, held from the base trace to the interaction trace across the
+  base trace commitment, is stored in the bits the AIR range-checks it to (ryun1's change in
+  frontier `66670df7`). About -350 MiB of wasm memory; the browser's peak is that commitment.
+- The circuit proof frees the verifier context once its base trace is written, not at the end
+  (after realadii's change in frontier `55720f34`). About -200 MiB through the circuit proof.
+
+Pay, prove time and peak memory, v0.2.0 -> v0.2.1. Medians of interleaved runs.
+
+| device | threads | cpu | gpu | full | lean | wasm (Node, 1 thread) |
+|---|---|---|---|---|---|---|
+| Linux, i9-10980XE (18 cores) + RTX 3080 | 18 | 9.72 -> 9.59 s, 2,681 -> **2,365 MiB** | 6.66 -> 6.54 s, 2,981 -> 2,772 MiB | 4.50 -> 4.46 s, 3,051 -> 2,769 MiB | not for discrete GPUs | 2,380 -> **2,027 MiB** |
+| macOS, Apple M5 Pro (64 GB) | 18 | 6.23 -> 6.28 s, 2,417 -> **2,072 MiB** | 4.54 -> 4.55 s, 3,794 -> 3,572 MiB | 3.17 -> 3.12 s, 5,024 -> 4,787 MiB | 4.86 -> 5.00 s, 2,406 -> 2,144 MiB | |
+| macOS, Apple M5 Pro | 6 | 10.59 -> 10.55 s, 2,344 -> **1,994 MiB** | 6.79 -> 6.82 s, 3,751 -> 3,512 MiB | 3.88 -> 3.89 s, 5,006 -> 4,771 MiB | 7.02 -> 7.04 s, 2,242 -> **2,030 MiB** | |
+| Galaxy S25+ (Snapdragon 8 Elite, 11 GB) | 8 | pending (the A/B is running) | | | | |
+| Chrome 154, RTX 3080 (web engine 5344d5ff61f6) | 16 | pay 13.8 -> 13.5 s; register 2,388 -> **2,035 MiB** | pay 11.1 -> 10.9 s; register 2,384 -> 2,007 MiB | | | |
+| iPhone 12 Pro / 17 Pro, TxProver | 6 | pending (the TxProver build on v0.2.1) | | | | |
+
+Across the four captures the peak drops in every mode: -160 to -316 MiB on the RTX desktop, -199
+to -373 MiB on the M5 Pro (physical footprint), -349 to -353 MiB of wasm memory (all four:
+2,027 / 1,987 / 1,932 / 2,027 MiB). Prove times are within noise (RTX -2.0 to +0.7%; M5 Pro at
+6 threads -0.6 to +0.6%).
+
+Correctness: every capture in every mode (cpu, gpu, full, lean, every hook forced to decline,
+shadow with 0 words, values or samples different, and the FRI and decommitment tamper tests, whose
+self-verification proves again on the CPU) is byte-identical and verifies on the RTX desktop, the
+M5 Pro (Metal) and the S25+ (Adreno).
+
+Results:
+- `bench/results/v0.2.1/rtx3080-i9.jsonl`: bench/run.sh on the release commit, 3 reps of cpu, gpu
+  and full and one of wasm; compared with `v0.2.0/rtx3080-i9.jsonl`, to which v0.2.0's wasm lines
+  were added with bench/run.sh's new wasm mode.
+- `bench/results/v0.2.1/m5pro.jsonl` and `v0.2.0/m5pro.jsonl`: both versions alternating rep by
+  rep, 3 reps of each mode at 18 and at 6 threads (the candidate built from the same code by path;
+  each line's `note` says how).
+- Chrome: the local site build with the v0.2.1 engine (outis branch prover-engine-v0.2.1) in
+  headless Chrome through gpu-scratch's review script, every proof verified and identical; its
+  memory is the page's reported wasm memory, against v0.2.0's engine 6ee471ac0989 on the same
+  review site.
+- The S25+ and the iPhones: added as their runs finish.
+
+The M5 Pro's v0.2.0 numbers here are bench/run.sh's, alternating with v0.2.1; the v0.2.0 section's
+were measured earlier on the merged branches and differ (e.g. cpu at 18 threads 5.2 vs 6.2 s).
 
 ## v0.2.0: the GPU modes
 
