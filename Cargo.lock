@@ -1000,7 +1000,7 @@ dependencies = [
 [[package]]
 name = "cairo-air"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "bincode",
  "bzip2",
@@ -1630,7 +1630,7 @@ dependencies = [
 [[package]]
 name = "cairo-program-runner-lib"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "anyhow",
  "cairo-lang-casm",
@@ -1735,7 +1735,7 @@ dependencies = [
 [[package]]
 name = "circuit-cairo-verifier"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "cairo-air",
  "circuit-common",
@@ -1754,7 +1754,7 @@ dependencies = [
 [[package]]
 name = "circuit-common"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "circuits",
  "circuits-stark-verifier",
@@ -1769,7 +1769,7 @@ dependencies = [
 [[package]]
 name = "circuit-prover"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "circuit-common",
  "circuit-verifier",
@@ -1791,7 +1791,7 @@ dependencies = [
 [[package]]
 name = "circuit-registry"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "circuit-common",
  "leaf-proof-format",
@@ -1805,7 +1805,7 @@ dependencies = [
 [[package]]
 name = "circuit-serialize"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "circuits",
  "circuits-stark-verifier",
@@ -1815,7 +1815,7 @@ dependencies = [
 [[package]]
 name = "circuit-verifier"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "circuit-common",
  "circuits",
@@ -1830,7 +1830,7 @@ dependencies = [
 [[package]]
 name = "circuits"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "blake2",
  "hashbrown 0.15.5",
@@ -1845,7 +1845,7 @@ dependencies = [
 [[package]]
 name = "circuits-stark-verifier"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "circuits",
  "hashbrown 0.15.5",
@@ -3369,7 +3369,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 [[package]]
 name = "leaf-proof-format"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "serde",
  "serde_with",
@@ -3378,7 +3378,7 @@ dependencies = [
 [[package]]
 name = "leaf-prover"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "cairo-air",
  "cairo-program-runner-lib",
@@ -4259,7 +4259,7 @@ dependencies = [
 [[package]]
 name = "privacy-circuit-verify"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "anyhow",
  "cairo-air",
@@ -4283,7 +4283,7 @@ dependencies = [
 [[package]]
 name = "privacy-prove"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "anyhow",
  "cairo-air",
@@ -5674,7 +5674,7 @@ dependencies = [
 [[package]]
 name = "stwo"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "blake2",
  "blake3",
@@ -5703,7 +5703,7 @@ dependencies = [
 [[package]]
 name = "stwo-air-utils"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "bytemuck",
  "itertools 0.12.1",
@@ -5715,7 +5715,7 @@ dependencies = [
 [[package]]
 name = "stwo-air-utils-derive"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "itertools 0.12.1",
  "proc-macro2",
@@ -5726,7 +5726,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-adapter"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5745,7 +5745,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-common"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "bytemuck",
  "itertools 0.12.1",
@@ -5764,7 +5764,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-prover"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5796,7 +5796,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-serialize"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "starknet-ff",
  "stwo",
@@ -5806,7 +5806,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-serialize-derive"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "quote",
  "syn 2.0.110",
@@ -5815,7 +5815,7 @@ dependencies = [
 [[package]]
 name = "stwo-cairo-utils"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "env_logger",
  "log",
@@ -5826,7 +5826,7 @@ dependencies = [
 [[package]]
 name = "stwo-constraint-framework"
 version = "2.4.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "hashbrown 0.15.5",
  "itertools 0.12.1",
@@ -5841,12 +5841,12 @@ dependencies = [
 [[package]]
 name = "stwo-gpu-bridge"
 version = "0.1.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 
 [[package]]
 name = "stwo-gpu-spike"
 version = "0.1.0"
-source = "git+https://github.com/outis-wallet/proving?rev=585032327315bb2a2a1098551ac3be9015104306#585032327315bb2a2a1098551ac3be9015104306"
+source = "git+https://github.com/outis-wallet/proving?rev=0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4#0ba05f374a8dbd5cae76c6b6643fc9074cfd9ca4"
 dependencies = [
  "ash",
  "bytemuck",
