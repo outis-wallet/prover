@@ -46,11 +46,20 @@ impl TxNativeSession {
             return cancelled("cancelled");
         }
         let session = &mut *session;
-        match self.pool.install(|| dispatch(session, method, &args)) {
+        let mut answer = match self.pool.install(|| dispatch(session, method, &args)) {
             Ok(value) => json!({ "ok": value }),
             Err(message) if self.cancelled() => cancelled(&message),
             Err(message) => json!({ "error": message }),
+        };
+        // A proof made with GPU hooks beyond the commitment was verified before it was returned
+        // (and proved again without them if it failed): how, beside its answer.
+        #[cfg(feature = "gpu")]
+        if method == "prove"
+            && let Some(report) = crate::gpu::take_self_verify()
+        {
+            answer["gpu_self_verify"] = json!(report);
         }
+        answer
     }
 }
 
@@ -104,8 +113,63 @@ fn dispatch(session: &mut TxSession, method: &str, args: &[Value]) -> Result<Val
     })
 }
 
+/// The thread count of a pool whose caller asks for 0: one per physical core. Hyperthreads don't
+/// speed the proof up: on an 18-core, 36-thread x86-64 machine, 36 threads proved no faster than
+/// 18, and the extra idle threads spent seconds of system time spinning in `sched_yield`. Phones
+/// have one thread per core, so there it is one per core as before. Never more than the threads
+/// the process may run on (its affinity, a cgroup's quota).
+pub fn default_threads() -> usize {
+    let available = std::thread::available_parallelism().map_or(1, |threads| threads.get());
+    physical_cores().map_or(available, |cores| cores.clamp(1, available))
+}
+
+/// The physical cores: the distinct sets of hardware threads that share a core, among the online
+/// CPUs (an offline CPU has no topology directory).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn physical_cores() -> Option<usize> {
+    let mut cores = std::collections::HashSet::new();
+    for entry in std::fs::read_dir("/sys/devices/system/cpu").ok()?.flatten() {
+        let name = entry.file_name();
+        let is_cpu = name.to_str().and_then(|name| name.strip_prefix("cpu")).is_some_and(|index| {
+            !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+        });
+        if !is_cpu {
+            continue;
+        }
+        if let Ok(siblings) = std::fs::read_to_string(entry.path().join("topology/thread_siblings_list")) {
+            cores.insert(siblings.trim().to_owned());
+        }
+    }
+    (!cores.is_empty()).then_some(cores.len())
+}
+
+/// The physical cores (`hw.physicalcpu`).
+#[cfg(target_vendor = "apple")]
+fn physical_cores() -> Option<usize> {
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const c_char,
+            old: *mut std::ffi::c_void,
+            old_len: *mut usize,
+            new: *mut std::ffi::c_void,
+            new_len: usize,
+        ) -> std::ffi::c_int;
+    }
+    let mut cores: i32 = 0;
+    let mut size = size_of::<i32>();
+    let read = unsafe {
+        sysctlbyname(c"hw.physicalcpu".as_ptr(), (&raw mut cores).cast(), &mut size, std::ptr::null_mut(), 0)
+    };
+    (read == 0 && cores > 0).then_some(cores as usize)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+fn physical_cores() -> Option<usize> {
+    None
+}
+
 /// Opens a session for one transaction (see `TxSession::new`) on a rayon pool of `threads`
-/// threads (0: one per core) with 16 MiB stacks: a call runs wholly on a pool thread, not just
+/// threads (0: one per physical core, see [`default_threads`]) with 16 MiB stacks: a call runs wholly on a pool thread, not just
 /// its parallel parts, so the threads get a main thread's stack (as the wasm build's
 /// -zstack-size) instead of rayon's 2 MiB. Returns null on failure and, if `error` is not null,
 /// sets `*error` to the message (free it with `tx_prove_free`); on success sets `*error` to null.
@@ -129,7 +193,7 @@ pub unsafe extern "C" fn tx_session_open(
         let cancel = Arc::new(AtomicBool::new(false));
         session.set_cancel_flag(cancel.clone());
         let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads as usize)
+            .num_threads(if threads == 0 { default_threads() } else { threads as usize })
             .stack_size(16 << 20)
             .thread_name(|index| format!("outis-prover-{index}"))
             .build()
@@ -214,6 +278,134 @@ pub unsafe extern "C" fn tx_session_close(session: *mut TxNativeSession) {
         drop(unsafe { &*session }.session.lock().unwrap_or_else(PoisonError::into_inner));
         drop(unsafe { Box::from_raw(session) });
     }));
+}
+
+/// Turns the GPU commitment on (`enabled` not 0) or off for every proof from now on, in this
+/// process (see `gpu`; only in a library built with the `gpu` feature). Off by default, unless
+/// `OUTIS_GPU=1` is in the environment at the first proof and this was not called. Returns
+/// `{"ok": adapter}` when on (e.g. "NVIDIA GeForce RTX 3080 (Vulkan)"), `{"ok": null}` when off, or
+/// `{"error": message}` when there is no GPU to use (the proofs then stay on the CPU). The first
+/// call that turns it on creates the device and compiles the kernels, which can take a second.
+/// Free the answer with `tx_prove_free`.
+#[cfg(feature = "gpu")]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu(enabled: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| match crate::gpu::set_gpu(enabled != 0) {
+        Ok(adapter) => json!({ "ok": adapter }),
+        Err(message) => json!({ "error": message }),
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
+/// Sets constraint evaluation on the GPU (the composition) for the proofs from now on, with the
+/// GPU on (see `tx_prove_set_gpu`; only in a library built with the `gpu` feature, natively):
+/// 0 off (the default, unless `OUTIS_GPU_COMPOSITION` says otherwise), 1 on, 2 shadow (evaluated
+/// on the GPU and on the CPU and compared, the CPU's result used; for debugging). A component the
+/// GPU can't take yet (its kernels compile in the background, the first time) is evaluated on the
+/// CPU; the proof is the same either way. Returns `{"ok": mode}`. Free the answer with
+/// `tx_prove_free`.
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu_composition(mode: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| {
+        let composition = match mode {
+            0 => crate::gpu::Composition::Off,
+            1 => crate::gpu::Composition::On,
+            2 => crate::gpu::Composition::Shadow,
+            _ => return json!({ "error": format!("mode {mode}: 0 off, 1 on, 2 shadow") }),
+        };
+        crate::gpu::set_composition(composition);
+        json!({ "ok": mode })
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
+/// Sets the decommitment on the GPU for the proofs from now on, with the GPU on (only in a library
+/// built with the `gpu` feature, natively): 0 off (the default, unless `OUTIS_GPU_DECOMMIT` says
+/// otherwise), 1 on, 2 shadow (evaluated on the GPU and on the CPU and compared, the CPU's values
+/// used; for debugging). A tree whose coefficients the GPU doesn't hold is decommitted on the CPU;
+/// the proof is the same either way. Returns `{"ok": mode}`. Free the answer with `tx_prove_free`.
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu_decommit(mode: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| {
+        let decommit = match mode {
+            0 => crate::gpu::Decommit::Off,
+            1 => crate::gpu::Decommit::On,
+            2 => crate::gpu::Decommit::Shadow,
+            _ => return json!({ "error": format!("mode {mode}: 0 off, 1 on, 2 shadow") }),
+        };
+        crate::gpu::set_decommit(decommit);
+        json!({ "ok": mode })
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
+/// Sets the out-of-domain samples on the GPU for the proofs from now on, with the GPU and its
+/// decommitment on (only in a library built with the `gpu` feature, natively): 0 off (the
+/// default, unless `OUTIS_GPU_OOD` says otherwise), 1 on, 2 shadow (evaluated on the GPU and on
+/// the CPU and compared, the CPU's values used; for debugging). A column whose coefficients the GPU
+/// doesn't hold is sampled on the CPU; the proof is the same either way. Returns `{"ok": mode}`.
+/// Free the answer with `tx_prove_free`.
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu_ood(mode: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| {
+        let ood = match mode {
+            0 => crate::gpu::Ood::Off,
+            1 => crate::gpu::Ood::On,
+            2 => crate::gpu::Ood::Shadow,
+            _ => return json!({ "error": format!("mode {mode}: 0 off, 1 on, 2 shadow") }),
+        };
+        crate::gpu::set_ood(ood);
+        json!({ "ok": mode })
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
+/// Sets the FRI quotients on the GPU for the proofs from now on, with the GPU and its
+/// decommitment on (only in a library built with the `gpu` feature, natively): 0 off (the
+/// default, unless `OUTIS_GPU_FRI` says otherwise), 1 on, 2 shadow (computed on the GPU and on
+/// the CPU and compared, the CPU's used; for debugging). Quotients the GPU doesn't take are
+/// computed on the CPU; the proof is the same either way. Returns `{"ok": mode}`. Free the answer
+/// with `tx_prove_free`.
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu_fri(mode: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| {
+        let fri = match mode {
+            0 => crate::gpu::Fri::Off,
+            1 => crate::gpu::Fri::On,
+            2 => crate::gpu::Fri::Shadow,
+            _ => return json!({ "error": format!("mode {mode}: 0 off, 1 on, 2 shadow") }),
+        };
+        crate::gpu::set_fri(fri);
+        json!({ "ok": mode })
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
+}
+
+/// Sets how long, in milliseconds, the GPU is kept at full clocks after each of its commitments (0:
+/// never), for the proofs from now on (see `gpu::set_keep_warm`; only in a library built with the
+/// `gpu` feature). Off by default, unless `STWO_GPU_KEEP_WARM_MS` is in the environment. A GPU
+/// lowers its clocks within a second or two between a proof's commitments, and the next one starts
+/// slow: keeping it warm saves about 0.1 s a proof (RTX 3080), for the power of a GPU at full clocks
+/// (about 100 W there) while it lasts. Not after the GPU was turned off with `tx_prove_set_gpu(0)`.
+/// Returns `{"ok": milliseconds}`. Free the answer with `tx_prove_free`.
+#[cfg(feature = "gpu")]
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_set_gpu_keep_warm(milliseconds: u32) -> *mut c_char {
+    let set = AssertUnwindSafe(|| {
+        crate::gpu::set_keep_warm(milliseconds);
+        json!({ "ok": milliseconds })
+    });
+    let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
+    into_c_string(answer.to_string())
 }
 
 /// A C string argument as UTF-8.

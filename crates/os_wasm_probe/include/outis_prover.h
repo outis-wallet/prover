@@ -40,8 +40,27 @@ void tx_session_cancel(TxNativeSession *session);
 void tx_session_close(TxNativeSession *session);
 
 /* Frees a string returned by this library (tx_session_call, tx_session_open's error,
-   tx_prove_replay). */
+   tx_prove_replay, tx_prove_set_gpu, tx_prove_set_gpu_keep_warm). */
 void tx_prove_free(char *answer);
+
+#ifdef OUTIS_PROVER_GPU
+/* Only in a library built with the `gpu` feature (define OUTIS_PROVER_GPU to declare it).
+   Turns the GPU commitment on (enabled != 0) or off for every proof from now on, process-wide.
+   Off by default, unless OUTIS_GPU=1 is in the environment at the first proof and this was not
+   called. Returns {"ok": "adapter (backend)"} when on, {"ok": null} when off, or
+   {"error": "message"} when there is no GPU to use (the proofs then stay on the CPU). Proofs are
+   byte-identical either way. The first call that turns it on creates the GPU device and compiles
+   its kernels (up to about a second). Free with tx_prove_free. */
+char *tx_prove_set_gpu(uint32_t enabled);
+
+/* Sets how long, in milliseconds, the GPU is kept at full clocks after each of its commitments
+   (0: never), for the proofs from now on. Off by default, unless STWO_GPU_KEEP_WARM_MS is in the
+   environment. A GPU lowers its clocks between a proof's commitments and the next one starts slow:
+   keeping it warm saves about 0.1 s a proof on a desktop GPU, for the power of the GPU at full
+   clocks while it lasts. Not after the GPU was turned off with tx_prove_set_gpu(0). Returns
+   {"ok": milliseconds}. Free with tx_prove_free. */
+char *tx_prove_set_gpu_keep_warm(uint32_t milliseconds);
+#endif
 
 #ifdef __cplusplus
 }

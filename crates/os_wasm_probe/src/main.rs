@@ -3,11 +3,14 @@
 //! `verify <response.json>`: verifies a starknet_proveTransaction result.
 //! `replay <capture dir> [out.json]`: the whole TxSession pipeline on a recording made by
 //! rpc-record-proxy.py (as replay.mjs does in Node), with timings, peak memory and a comparison
-//! with the native prover's response.
+//! with the native prover's response. One thread per physical core, unless RAYON_NUM_THREADS.
 //! `ffi <capture dir> [--threads N] [--cancel-after S]`: the same through the C interface the apps
 //! link (include/outis_prover.h), proved and verified; with --cancel-after, the prove is cancelled
 //! S seconds in and the time it takes to return is measured.
-//! TRACE=info (or debug, ...) prints the prover's tracing events with their times.
+//! TRACE=info (or debug, ...) prints the prover's tracing events with their times, and each span's
+//! opening and closing (with its busy and idle time).
+//! With the `gpu` feature, OUTIS_GPU=1 commits on the GPU (see the library's `gpu`), and replay
+//! lists the commitments it was asked for; `ffi --gpu` turns it on through `tx_prove_set_gpu`.
 use std::ffi::{c_char, CStr, CString};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -24,11 +27,14 @@ fn main() {
         tracing_subscriber::fmt()
             .with_max_level(level.parse::<tracing::Level>().expect("TRACE: a tracing level"))
             .with_timer(tracing_subscriber::fmt::time::uptime())
-            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::ENTER)
+            .with_span_events(
+                tracing_subscriber::fmt::format::FmtSpan::ENTER | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+            )
             .init();
     }
     let usage = "usage: os_native_probe os <input.json> | verify <response.json> | replay <capture dir> [out.json] \
-                 | ffi <capture dir> [--threads N] [--cancel-after S]";
+                 | ffi <capture dir> [--threads N] [--cancel-after S] [--gpu] [--keep-warm MS] \
+                 [--composition 0|1|2] [--decommit 0|1|2] [--ood 0|1|2] [--fri 0|1|2]";
     let option = |name: &str| {
         args.iter().position(|arg| arg == name).map(|index| args[index + 1].parse::<f64>().expect(name))
     };
@@ -45,25 +51,212 @@ fn main() {
             let verdict = os_wasm_probe::verify_result(&input);
             println!("{verdict:?} in {:.2} s", started.elapsed().as_secs_f64());
         }
-        Some("replay") => replay(Path::new(&args[2]), args.get(3).map(Path::new)),
+        Some("replay") => {
+            gpu_from_env();
+            replay(Path::new(&args[2]), args.get(3).map(Path::new))
+        }
         Some("ffi") => ffi(
             Path::new(&args[2]),
             option("--threads").unwrap_or(0.0) as u32,
             option("--cancel-after").map(Duration::from_secs_f64),
+            args.iter().any(|arg| arg == "--gpu"),
+            option("--keep-warm").map(|ms| ms as u32),
+            option("--composition").map(|mode| mode as u32),
+            option("--decommit").map(|mode| mode as u32),
+            option("--ood").map(|mode| mode as u32),
+            option("--fri").map(|mode| mode as u32),
         ),
         _ => panic!("{usage}"),
     }
+    // No GPU work in the background while the process exits.
+    #[cfg(feature = "gpu")]
+    os_wasm_probe::gpu::shutdown();
 }
 
 fn replay(capture: &Path, out: Option<&Path>) {
-    let report = os_wasm_probe::replay::replay(capture, &|event| match event {
-        Progress::Transaction { block, tx_hash } => println!("block {block}, tx {tx_hash}"),
-        Progress::Note { message } => println!("{message}"),
-        Progress::Phase { phase: Phase::Prove } => println!("proving"),
-        _ => {}
-    });
+    // One thread per physical core, as the C entry points do, unless RAYON_NUM_THREADS says.
+    if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(os_wasm_probe::native::default_threads())
+            .build_global()
+            .expect("thread pool");
+    }
+    // REPLAY_REPEAT=N proves N times in this process (e.g. a cold first proof, then warm ones);
+    // the summary is the last one's.
+    let repeat: usize = std::env::var("REPLAY_REPEAT").ok().and_then(|n| n.parse().ok()).unwrap_or(1);
+    let mut report = None;
+    for round in 0..repeat.max(1) {
+        #[cfg(feature = "gpu")]
+        if let Ok(ms) = std::env::var("OUTIS_GPU_COMPOSITION_WAIT_MS") {
+            // For tests: the constraint kernels known to the library compiled before the proof
+            // (a proof never waits for them itself).
+            let ms = ms.parse().expect("OUTIS_GPU_COMPOSITION_WAIT_MS");
+            let ready = os_wasm_probe::gpu::wait_composition_compiled(Duration::from_millis(ms));
+            println!("constraint kernels compiled before proof {round}: {ready}");
+        }
+        let started = Instant::now();
+        let this = os_wasm_probe::replay::replay(capture, &|event| match event {
+            Progress::Transaction { block, tx_hash } => println!("block {block}, tx {tx_hash}"),
+            Progress::Note { message } => println!("{message}"),
+            Progress::Phase { phase: Phase::Prove } => println!("proving"),
+            _ => {}
+        });
+        if repeat > 1 {
+            println!(
+                "proof {round}: prove {:.2} s, {} in {:.2} s",
+                this.prove_s,
+                if this.identical { "IDENTICAL" } else { "DIFFERENT" },
+                started.elapsed().as_secs_f64()
+            );
+        }
+        #[cfg(feature = "gpu")]
+        if let Some(report) = os_wasm_probe::gpu::vram_report() {
+            println!("proof {round}: video memory after: {report}");
+        }
+        #[cfg(feature = "gpu")]
+        if let Some((stats, (compared, different))) = os_wasm_probe::gpu::take_decommit_stats() {
+            if stats.trees > 0 {
+                println!(
+                    "proof {round}: decommitment on the GPU: {} trees of {} ({} not resident, {} failed), \
+                     {} columns, {} values, {:.3} s (plan {:.3}, setup {:.3}, GPU {:.3}, finish {:.3}); \
+                     shadow {compared} columns compared, {different} values differ",
+                    stats.served, stats.trees, stats.not_resident, stats.failed, stats.columns, stats.positions, stats.seconds,
+                    stats.times.plan, stats.times.setup, stats.times.gpu, stats.times.finish,
+                );
+            }
+        }
+        #[cfg(feature = "gpu")]
+        if let Some((stats, (compared, different))) = os_wasm_probe::gpu::take_fri_stats() {
+            if stats.calls > 0 {
+                println!(
+                    "proof {round}: FRI quotients on the GPU: {} of {} ({} declined, {} refused for video memory, {} failed{}), \
+                     {} columns ({} from values), {:.3} s (plan {:.3}, setup {:.3}, GPU {:.3}); shadow {compared} words compared, {different} words differ",
+                    stats.served, stats.calls, stats.declined, stats.refused_vram, stats.failed,
+                    stats.reason.as_deref().map(|r| format!(": {r}")).unwrap_or_default(),
+                    stats.columns, stats.value_columns, stats.seconds,
+                    stats.times.plan, stats.times.setup, stats.times.gpu,
+                );
+            }
+        }
+        #[cfg(feature = "gpu")]
+        if let Some(report) = os_wasm_probe::gpu::take_self_verify() {
+            println!(
+                "proof {round}: self-verification: {}, {:.3} s; {}",
+                if report.verified { "verified" } else { "NOT VERIFIED" },
+                report.verify_s,
+                match &report.retried {
+                    Some(reason) => format!("proved again with the hooks off in {:.2} s: {reason}", report.retry_s),
+                    None => "not proved again".to_string(),
+                }
+            );
+        }
+        #[cfg(feature = "gpu")]
+        if let Some((stats, (compared, different))) = os_wasm_probe::gpu::take_ood_stats() {
+            if stats.calls > 0 {
+                println!(
+                    "proof {round}: out-of-domain samples on the GPU: {} columns of {} ({} not resident, {} failed), \
+                     {} samplings, {} groups, {:.3} s (plan {:.3}, setup {:.3}, GPU {:.3}, finish {:.3}); \
+                     shadow {compared} samples compared, {different} samples differ",
+                    stats.served, stats.columns, stats.not_resident, stats.failed, stats.calls, stats.groups, stats.seconds,
+                    stats.times.plan, stats.times.setup, stats.times.gpu, stats.times.finish,
+                );
+            }
+        }
+        #[cfg(feature = "gpu")]
+        if let Some((stats, (ready, compiling, failed))) = os_wasm_probe::gpu::take_composition_stats() {
+            println!(
+                "proof {round}: {}; kernels ready {ready}, compiling {compiling}, failed {failed}",
+                stwo_gpu_spike::constraint::composer::describe(&stats)
+            );
+            let mut per: Vec<_> = stats.per_component.iter().collect();
+            per.sort_by(|a, b| b.1 .1.total_cmp(&a.1 .1));
+            for (name, (count, seconds)) in per {
+                println!("  composition {name}: {count} x, {:.1} ms", seconds * 1e3);
+            }
+        }
+        report = Some(this);
+    }
+    let report = report.expect("a proof");
     if let Some(out) = out {
         std::fs::write(out, &report.result_json).expect("write result");
+    }
+    #[cfg(feature = "gpu")]
+    for commitment in os_wasm_probe::gpu::take_commitments() {
+        println!(
+            "commitment #{}: {} columns up to 2^{}, blowup 2^{}, lifted to 2^{}: {} {:.3} s",
+            commitment.index,
+            commitment.columns,
+            commitment.max_log_size,
+            commitment.log_blowup,
+            commitment.lifting_log_size,
+            commitment.declined.map_or("GPU".to_string(), |reason| format!("CPU ({reason}), hook")),
+            commitment.seconds,
+        );
+    }
+    #[cfg(feature = "gpu")]
+    if let Some((stats, check)) = os_wasm_probe::gpu::take_part_stats() {
+        if stats.requests > 0 {
+            println!(
+                "parts: {} requests, {} columns: {} hits ({} MiB, {} copied), {} misses, {} mismatches; \
+                 kept {} MiB, held at most {} MiB; lookups {:.3} s, transfers {:.3} s",
+                stats.requests,
+                stats.columns,
+                stats.hits,
+                stats.hit_bytes >> 20,
+                stats.copies,
+                stats.misses,
+                stats.mismatches,
+                stats.kept_bytes >> 20,
+                stats.max_held_bytes >> 20,
+                stats.lookup.as_secs_f64(),
+                stats.transfer.as_secs_f64(),
+            );
+        }
+        if !stats.trees.is_empty() {
+            let trees: Vec<String> = stats
+                .trees
+                .iter()
+                .map(|(bytes, content, kept, reserved)| {
+                    format!(
+                        "{} MiB {:?} {} (holding {})",
+                        bytes >> 20,
+                        content,
+                        if *kept { "kept" } else { "NOT kept" },
+                        reserved >> 20
+                    )
+                })
+                .collect();
+            println!("parts trees offered: {}", trees.join("; "));
+        }
+        if stats.over_budget > 0 {
+            println!(
+                "parts not kept (video memory): {} trees (cap {}, process share {}, driver budget {}), \
+                 resident hits {}, misses {}",
+                stats.over_budget,
+                stats.refused_cap,
+                stats.refused_share,
+                stats.refused_driver_budget,
+                stats.resident_hits,
+                stats.resident_misses,
+            );
+        }
+        if stats.readback_wait + stats.readback_copy > std::time::Duration::ZERO {
+            println!(
+                "parts readback: wait {:.3} s, copy {:.3} s",
+                stats.readback_wait.as_secs_f64(),
+                stats.readback_copy.as_secs_f64()
+            );
+        }
+        if stats.recompute.bytes > 0 {
+            println!(
+                "parts recompute: {:?}; GPU memory kept {} MiB",
+                stats.recompute,
+                stats.recompute_bytes >> 20
+            );
+        }
+        if check.columns + check.declined > 0 {
+            println!("parts check: {check:?}");
+        }
     }
     let footprint = report.peak.footprint_mib.map_or(String::new(), |mib| format!(", peak footprint {mib} MiB"));
     let proof_kib = report.proof_bytes / 1024;
@@ -81,6 +274,28 @@ fn replay(capture: &Path, out: Option<&Path>) {
         report.os_steps,
         report.peak.rss_mib,
     );
+}
+
+/// With the `gpu` feature and OUTIS_GPU=1, the GPU committer, made before the proof (so its setup
+/// isn't counted in the prove time) and the adapter printed.
+fn gpu_from_env() {
+    #[cfg(feature = "gpu")]
+    if os_wasm_probe::gpu::env_enabled() {
+        let started = Instant::now();
+        match os_wasm_probe::gpu::set_gpu(true) {
+            Ok(adapter) => {
+                println!(
+                    "GPU commitment on {} (ready in {:.2} s)",
+                    adapter.unwrap_or_default(),
+                    started.elapsed().as_secs_f64()
+                );
+                if let Some(report) = os_wasm_probe::gpu::vram_report() {
+                    println!("video memory: {report}");
+                }
+            }
+            Err(error) => println!("GPU commitment unavailable, on the CPU: {error}"),
+        }
+    }
 }
 
 /// A session driven only through the C interface, as the apps drive it.
@@ -141,7 +356,69 @@ fn take(answer: *mut c_char) -> String {
     text
 }
 
-fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>) {
+fn ffi(
+    capture: &Path,
+    threads: u32,
+    cancel_after: Option<Duration>,
+    gpu: bool,
+    keep_warm: Option<u32>,
+    composition: Option<u32>,
+    decommit: Option<u32>,
+    ood: Option<u32>,
+    fri: Option<u32>,
+) {
+    // --gpu: the GPU through the C entry point, as an app turns it on. Without it, OUTIS_GPU=1
+    // turns it on at the proof, as for an app that sets the environment.
+    // --keep-warm MS: keep-warm through its C entry point, before the GPU is on.
+    if let Some(milliseconds) = keep_warm {
+        #[cfg(feature = "gpu")]
+        println!(
+            "tx_prove_set_gpu_keep_warm({milliseconds}): {}",
+            take(os_wasm_probe::native::tx_prove_set_gpu_keep_warm(milliseconds))
+        );
+        #[cfg(not(feature = "gpu"))]
+        panic!("--keep-warm {milliseconds}: built without the gpu feature");
+    }
+    // --composition N: constraint evaluation on the GPU through the C entry point (0 off, 1 on,
+    // 2 shadow), before the GPU is turned on, as an app would.
+    if let Some(mode) = composition {
+        #[cfg(feature = "gpu")]
+        println!(
+            "tx_prove_set_gpu_composition({mode}): {}",
+            take(os_wasm_probe::native::tx_prove_set_gpu_composition(mode))
+        );
+        #[cfg(not(feature = "gpu"))]
+        panic!("--composition {mode}: built without the gpu feature");
+    }
+    // --decommit N, --ood N: the decommitment and the out-of-domain samples on the GPU, the same
+    // way.
+    if let Some(mode) = decommit {
+        #[cfg(feature = "gpu")]
+        println!(
+            "tx_prove_set_gpu_decommit({mode}): {}",
+            take(os_wasm_probe::native::tx_prove_set_gpu_decommit(mode))
+        );
+        #[cfg(not(feature = "gpu"))]
+        panic!("--decommit {mode}: built without the gpu feature");
+    }
+    if let Some(mode) = ood {
+        #[cfg(feature = "gpu")]
+        println!("tx_prove_set_gpu_ood({mode}): {}", take(os_wasm_probe::native::tx_prove_set_gpu_ood(mode)));
+        #[cfg(not(feature = "gpu"))]
+        panic!("--ood {mode}: built without the gpu feature");
+    }
+    if let Some(mode) = fri {
+        #[cfg(feature = "gpu")]
+        println!("tx_prove_set_gpu_fri({mode}): {}", take(os_wasm_probe::native::tx_prove_set_gpu_fri(mode)));
+        #[cfg(not(feature = "gpu"))]
+        panic!("--fri {mode}: built without the gpu feature");
+    }
+    if gpu {
+        #[cfg(feature = "gpu")]
+        println!("tx_prove_set_gpu(1): {}", take(os_wasm_probe::native::tx_prove_set_gpu(1)));
+        #[cfg(not(feature = "gpu"))]
+        panic!("--gpu: built without the gpu feature");
+    }
     let recording = Recording::open(capture);
     let (header, transaction) = (recording.header(), recording.transaction());
 
@@ -193,8 +470,13 @@ fn ffi(capture: &Path, threads: u32, cancel_after: Option<Duration>) {
 
     let Some(cancel_after) = cancel_after else {
         let prove_started = Instant::now();
-        let result_json = session.call_string("prove", json!([]));
+        let answer = session.answer("prove", json!([]));
         let prove_s = prove_started.elapsed().as_secs_f64();
+        // With GPU hooks beyond the commitment, how the proof was verified before it was returned.
+        if let Some(report) = answer.get("gpu_self_verify") {
+            println!("prove's gpu_self_verify: {report}");
+        }
+        let result_json = answer["ok"].as_str().unwrap_or_else(|| panic!("prove: {answer}")).to_string();
         let result: Value = serde_json::from_str(&result_json).unwrap();
         let same = identical(&result, &recording.native_result());
         let verify_started = Instant::now();

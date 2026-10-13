@@ -18,7 +18,8 @@ WebAssembly (threaded, on Web Workers; [outis.xyz/prover](https://outis.xyz/prov
 | `js/worker.mjs` | The web engine's worker: proves a bundled capture in a browser and reports progress and the result (outis.xyz/prover). |
 | `captures/` | Four Privacy Pool transactions on Starknet Sepolia (register, deposit, pay, withdraw): the recorded RPC answers, the prove request and the native prover's response, the reference for byte identity. The contract classes are in `captures/classes`, symlinked from each capture (on Windows, enable git's `core.symlinks`). |
 | `wasm-stubs/c-kzg` | An empty `c-kzg`: the C library has no wasm32 build, and the proving path never calls it. |
-| `scripts/` | `build-native.sh`, `build-wasm.sh [node\|web]`, `build-web-engine.sh <out>` (the worker, the wasm and the captures, for a page that proves in the browser), `build-android.sh` (the static library for Android apps). |
+| `js/gpu.mjs` | A page's GPU worker for the web engine (builds with feature `gpu`): the striped commitments on WebGPU. |
+| `scripts/` | `build-native.sh`, `build-wasm.sh [node\|web\|web-gpu]`, `build-web-engine.sh <out>` (the worker, the wasm and the captures, for a page that proves in the browser), `build-android.sh` (the static library for Android apps). |
 
 ## Upstream
 
@@ -47,12 +48,42 @@ target/release/os_native_probe replay captures/pay      # proves, and compares w
 target/release/os_native_probe ffi captures/pay         # the same through the C interface
 target/release/os_native_probe ffi captures/pay --cancel-after 3   # cancels the proof 3 s in
 
+scripts/build-native.sh --features gpu                 # with the GPU commitment (wgpu), off until asked:
+OUTIS_GPU=1 target/release/os_native_probe replay captures/pay      # commits on the GPU, same proof
+
 scripts/build-wasm.sh node
 node js/replay.mjs captures/pay --prove                 # the same, in wasm (single-threaded)
 
 scripts/build-wasm.sh web                               # pkg-mt/, for browsers (COOP/COEP)
 scripts/build-web-engine.sh ../outis/wallet/apps/prover/public   # outis.xyz/prover's engine
 ```
+
+The `gpu` feature commits the proof's striped trees on a GPU, registered as stwo's striped-commit
+hook (`src/gpu.rs`, which takes the module for the target). A commitment the GPU declines or fails,
+or a machine without a GPU, falls back to the CPU; the proof is byte-identical either way.
+
+**Natively** (`src/gpu/native.rs`), through wgpu (stwo-gpu-spike, from the proving fork):
+`OUTIS_GPU=1` in the environment, or `tx_prove_set_gpu` in the C interface, turns it on. The
+adapter is wgpu's choice, steered by `WGPU_BACKEND` and `WGPU_ADAPTER_NAME`. Keep-warm (the GPU
+kept at full clocks for a window after each commitment, so the next one doesn't start on a GPU that
+lowered its clocks) is off by default: `STWO_GPU_KEEP_WARM_MS=<ms>`, or
+`tx_prove_set_gpu_keep_warm(ms)`, turns it on.
+
+**In browsers (experimental)** (`src/gpu/web.rs`). `scripts/build-wasm.sh web-gpu` builds the
+threaded module with feature `gpu` into `pkg-mt-gpu/`: stwo's striped commitments go to a page's
+WebGPU worker, through a job table in the module's shared memory (the worker and the bridge are in
+proving's `crates/stwo_gpu_spike/web`, whose README is the design note).
+
+```
+scripts/build-wasm.sh web-gpu
+(cd <proving>/crates/stwo_gpu_spike/web && ./build.sh gpu)        # the GPU worker's module
+PKG=pkg-mt-gpu GPU_WEB=<proving>/crates/stwo_gpu_spike/web scripts/build-web-engine.sh <out>
+```
+
+The page starts the GPU worker once (`engine/gpu.mjs`'s `startGpu()`) and sends a port to it
+with each proof (`gpuPort` in the message to `engine/worker.mjs`), which attaches it to the
+module's memory before the proof and detaches it after. Without a port, or without WebGPU, the
+build proves on the CPU.
 
 The Outis Prover apps (iOS and Android) link the pipeline as a static library built from this
 repository (`--crate-type staticlib` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and
@@ -69,6 +100,12 @@ WebAssembly in Chrome on the same machine (18 cores), 16 threads: proving 13.7 t
 memory about 2.5 GiB, every proof verified and byte-identical. A single thread runs about 1.3x
 native. wasm32's system allocator is one dlmalloc behind one spin lock; `memory.rs` keeps small
 blocks off it, without which the proof got slower past about 8 threads.
+
+With the GPU commitment (feature `gpu`), in Chrome on the same machine's RTX 3080 through
+WebGPU, 16 threads: proving 11.1 to 12.1 s against 13.6 to 14.6 s without (1.2x), the 8 striped
+commitments 2.0 to 2.3 s on the GPU against 4.6 to 5.4 s on the CPU, every proof verified and
+byte-identical; the wasm memory unchanged, the tab about 200 MiB larger. Firefox 157 with WebGPU
+forced on: the same. Details in proving's `crates/stwo_gpu_spike/web/README.md`.
 
 ## Credits
 

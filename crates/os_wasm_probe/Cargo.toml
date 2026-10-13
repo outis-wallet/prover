@@ -38,10 +38,16 @@ starknet_os = { workspace = true, features = ["deserialize"] }
 # Pinned to the prover wasm build and the installed wasm-bindgen-cli.
 wasm-bindgen = "=0.2.126"
 js-sys = "=0.3.103"
+# `gpu`: stwo's striped-commit hook (src/gpu.rs).
+stwo = { workspace = true, features = ["prover"], optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # `replay`: the C entry point runs the proof on a pool of the caller's size.
 rayon = "1.11"
+# `gpu`: the GPU's commitment (wgpu), natively (src/gpu/native.rs).
+stwo-gpu-spike = { workspace = true, optional = true }
+# `gpu`: constraint evaluation's part-extension hook (src/gpu/native.rs, STWO_GPU_PARTS).
+stwo-constraint-framework = { workspace = true, features = ["prover"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # A rayon thread pool on Web Workers sharing the module's memory; rayon itself for stop_threads.
@@ -52,6 +58,8 @@ rayon = { version = "1.11", optional = true }
 parking_lot_core = { version = "0.9", optional = true, features = ["nightly"] }
 # The block cache's heap for small blocks (memory.rs).
 dlmalloc = "0.2"
+# `gpu`: the bridge to the page's GPU worker (src/gpu/web.rs).
+stwo-gpu-bridge = { workspace = true, optional = true }
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
@@ -59,3 +67,7 @@ getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] 
 [features]
 # The threaded build (needs atomics and shared memory).
 threads = ["dep:wasm-bindgen-rayon", "dep:parking_lot_core", "dep:rayon"]
+# The striped commitments on a GPU (src/gpu.rs), for the target built: natively on the machine's
+# GPU through wgpu (Vulkan, Metal, DX12; stwo-gpu-spike), when turned on; on wasm32, the threaded
+# build, on the page's WebGPU worker when one is attached (through stwo-gpu-bridge).
+gpu = ["threads", "dep:stwo", "dep:stwo-gpu-spike", "dep:stwo-gpu-bridge", "dep:stwo-constraint-framework"]
