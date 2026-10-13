@@ -36,12 +36,13 @@ Pay, prove time and peak memory, v0.2.0 -> v0.2.1. Medians of interleaved runs.
 | Linux, i9-10980XE (18 cores) + RTX 3080 | 18 | 9.72 -> 9.59 s, 2,681 -> **2,365 MiB** | 6.66 -> 6.54 s, 2,981 -> 2,772 MiB | 4.50 -> 4.46 s, 3,051 -> 2,769 MiB | not for discrete GPUs | 2,380 -> **2,027 MiB** |
 | macOS, Apple M5 Pro (64 GB) | 18 | 6.23 -> 6.28 s, 2,417 -> **2,072 MiB** | 4.54 -> 4.55 s, 3,794 -> 3,572 MiB | 3.17 -> 3.12 s, 5,024 -> 4,787 MiB | 4.86 -> 5.00 s, 2,406 -> 2,144 MiB | |
 | macOS, Apple M5 Pro | 6 | 10.59 -> 10.55 s, 2,344 -> **1,994 MiB** | 6.79 -> 6.82 s, 3,751 -> 3,512 MiB | 3.88 -> 3.89 s, 5,006 -> 4,771 MiB | 7.02 -> 7.04 s, 2,242 -> **2,030 MiB** | |
-| Galaxy S25+ (Snapdragon 8 Elite, 11 GB) | 8 | pending (the A/B is running) | | | | |
+| Galaxy S25+ (Snapdragon 8 Elite, 11 GB) | 8 | 21.8 -> 21.0 s, 2,449 -> **2,094 MiB** | 17.0 -> 17.1 s, 4,152 -> 3,921 MiB | | 16.6 -> 16.6 s, 2,918 -> **2,636 MiB** | |
 | Chrome 154, RTX 3080 (web engine 5344d5ff61f6) | 16 | pay 13.8 -> 13.5 s; register 2,388 -> **2,035 MiB** | pay 11.1 -> 10.9 s; register 2,384 -> 2,007 MiB | | | |
 | iPhone 12 Pro / 17 Pro, TxProver | 6 | pending (the TxProver build on v0.2.1) | | | | |
 
 Across the four captures the peak drops in every mode: -160 to -316 MiB on the RTX desktop, -199
-to -373 MiB on the M5 Pro (physical footprint), -349 to -353 MiB of wasm memory (all four:
+to -373 MiB on the M5 Pro (physical footprint), -200 to -358 MiB on the S25+ (RSS plus kgsl),
+-349 to -353 MiB of wasm memory (all four:
 2,027 / 1,987 / 1,932 / 2,027 MiB). Prove times are within noise (RTX -2.0 to +0.7%; M5 Pro at
 6 threads -0.6 to +0.6%).
 
@@ -61,7 +62,12 @@ Results:
   headless Chrome through gpu-scratch's review script, every proof verified and identical; its
   memory is the page's reported wasm memory, against v0.2.0's engine 6ee471ac0989 on the same
   review site.
-- The S25+ and the iPhones: added as their runs finish.
+- `bench/results/v0.2.1/s25plus.jsonl` and `v0.2.0/s25plus.jsonl`: the phone's run.sh over adb,
+  both versions alternating run by run, 2 reps of cpu, gpu and lean per capture, thermally gated
+  (status below moderate, battery at most 41.0 C) with a 20 s cool-off; the peak is RSS plus the
+  GPU driver's allocations above their start, at the same moment. Phone times move a few percent
+  with its temperature.
+- The iPhones: added as their runs finish (TxProver on v0.2.1 is installed on the 12 Pro and 17 Pro).
 
 The M5 Pro's v0.2.0 numbers here are bench/run.sh's, alternating with v0.2.1; the v0.2.0 section's
 were measured earlier on the merged branches and differ (e.g. cpu at 18 threads 5.2 vs 6.2 s).
