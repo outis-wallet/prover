@@ -4,6 +4,7 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -221,6 +222,7 @@ fn run_pipeline(capture: &Path, progress: &(dyn Fn(Progress<'_>) + Sync)) -> Rep
     let header = recording.header();
     let mut session =
         TxSession::new("SN_SEPOLIA", &header.to_string(), &transaction.to_string()).expect("session");
+    session.set_cancel_flag(REPLAY_CANCEL.clone());
     progress(Progress::Transaction { block: session.block_number(), tx_hash: &session.tx_hash() });
     let initial_reads = recording.initial_reads();
     session.add_reads(&initial_reads.to_string()).expect("reads");
@@ -300,9 +302,22 @@ struct ProgressTarget {
 // The caller of tx_prove_replay promises that the callback may run on any thread with `context`.
 unsafe impl Sync for ProgressTarget {}
 
+/// The stop flag of the replay under way (an app runs one at a time): [`tx_prove_replay_cancel`]
+/// sets it, and the session's proof stops at its next step, as a native session's does.
+static REPLAY_CANCEL: LazyLock<Arc<AtomicBool>> = LazyLock::new(|| Arc::new(AtomicBool::new(false)));
+
+/// C entry point: asks the replay under way to stop. [`tx_prove_replay`] then answers
+/// `{"error": "cancelled", "cancelled": true}`: within about a second and a half during the Cairo
+/// proof; the circuit proof (its last few seconds) runs to its end first. Safe from any thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_replay_cancel() {
+    REPLAY_CANCEL.store(true, Ordering::Relaxed);
+}
+
 /// C entry point (the iOS app): replays the capture in the directory `capture_dir` on a pool of
 /// `threads` threads (0: one per core) and returns the [`Report`] as pretty JSON, or
-/// `{"error": ...}`. `progress` (may be null) gets the [`Progress`] events. Free the result with
+/// `{"error": ...}`, or `{"error": "cancelled", "cancelled": true}` once [`tx_prove_replay_cancel`]
+/// was called. `progress` (may be null) gets the [`Progress`] events. Free the result with
 /// [`tx_prove_free`].
 ///
 /// # Safety
@@ -316,6 +331,7 @@ pub unsafe extern "C" fn tx_prove_replay(
     context: *mut c_void,
 ) -> *mut c_char {
     let capture = PathBuf::from(unsafe { CStr::from_ptr(capture_dir) }.to_string_lossy().into_owned());
+    REPLAY_CANCEL.store(false, Ordering::Relaxed);
     // A reference to the whole target, which is Sync, not to its fields (closures capture those).
     let target = &ProgressTarget { callback: progress, context };
     let send = |event: Progress<'_>| {
@@ -343,6 +359,12 @@ pub unsafe extern "C" fn tx_prove_replay(
             .unwrap_or("panic");
         json!({ "error": message }).to_string()
     });
+    // Stopped: whatever the run got to (an error at its next step, or a proof it finished).
+    let answer = if REPLAY_CANCEL.load(Ordering::Relaxed) {
+        json!({ "error": "cancelled", "cancelled": true }).to_string()
+    } else {
+        answer
+    };
     CString::new(answer).expect("no NUL in JSON").into_raw()
 }
 
