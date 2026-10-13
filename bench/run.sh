@@ -2,14 +2,18 @@
 # The prover's baseline: proves the captures natively in each mode, a few times, interleaved, and
 # appends one JSON line per proof to bench/results/<version>/<device>.jsonl (version: git describe),
 # then prints the medians. Run it on a quiet machine after `scripts/build-native.sh --features gpu`
-# (or without the feature for cpu only). See BASELINES.md.
+# (or without the feature for cpu only), and `scripts/build-wasm.sh node` for the wasm mode. See
+# BASELINES.md.
 #
 # usage: bench/run.sh [--modes cpu,gpu,full,lean] [--captures register,deposit,pay,withdraw]
 #                     [--threads N] [--reps R] [--device LABEL] [--out FILE] [--bin PATH]
+#                     [--replay-js PATH]
 #   modes: cpu   no GPU
 #          gpu   the striped commitments on the GPU (OUTIS_GPU=1)
 #          full  gpu + composition, decommitment, out-of-domain samples, FRI quotients on the GPU
 #          lean  gpu, lean commitments for unified memory (STWO_GPU_LEAN=1)
+#          wasm  the wasm build in Node (js/replay.mjs, one thread): its peak is the wasm memory,
+#                what a browser tab holds (the iPhone's Safari stops a tab near 2.25 GB in all)
 #   threads: default the prover's own (one per physical core); reps: default 3; device: a short
 #   label for the machine (default the host name), e.g. rtx3080-i9 or m5pro.
 # A full-mode run first proves once unrecorded, so its constraint kernels are compiled (a first
@@ -19,6 +23,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 modes=cpu captures=register,deposit,pay,withdraw threads="" reps=3 device="" out="" bin=target/release/os_native_probe
+replay_js=js/replay.mjs
 while [ $# -gt 0 ]; do
   case "$1" in
     --modes) modes=$2; shift 2 ;;
@@ -28,10 +33,16 @@ while [ $# -gt 0 ]; do
     --device) device=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     --bin) bin=$2; shift 2 ;;
+    --replay-js) replay_js=$2; shift 2 ;;
     *) echo "bench/run.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
-[ -x "$bin" ] || { echo "No $bin: build it first (scripts/build-native.sh --features gpu)" >&2; exit 1; }
+if [ "$modes" != wasm ]; then
+  [ -x "$bin" ] || { echo "No $bin: build it first (scripts/build-native.sh --features gpu)" >&2; exit 1; }
+fi
+case ",$modes," in
+  *,wasm,*) [ -f "$(dirname "$replay_js")/node/os_wasm_probe.js" ] || { echo "No wasm build next to $replay_js: scripts/build-wasm.sh node" >&2; exit 1; } ;;
+esac
 version=$(git describe --tags --always --dirty 2>/dev/null || echo unknown)
 commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 device=${device:-$(hostname -s)}
@@ -48,6 +59,7 @@ mode_env() {
     gpu) echo "OUTIS_GPU=1" ;;
     full) echo "OUTIS_GPU=1 OUTIS_GPU_COMPOSITION=1 OUTIS_GPU_DECOMMIT=1 OUTIS_GPU_OOD=1 OUTIS_GPU_FRI=1" ;;
     lean) echo "OUTIS_GPU=1 STWO_GPU_LEAN=1" ;;
+    wasm) echo "" ;;
     *) echo "bench/run.sh: unknown mode $1" >&2; exit 2 ;;
   esac
 }
@@ -56,9 +68,13 @@ mode_env() {
 prove() { # mode capture rep
   local log
   log=$(mktemp)
+  if [ "$1" = wasm ]; then
+    OUT=$(dirname "$log")/bench-replay-out node "$replay_js" "captures/$2" --prove > "$log" 2>&1 || true
+  else
   # shellcheck disable=SC2046
   env -u OUTIS_GPU -u STWO_GPU_LEAN -u OUTIS_GPU_COMPOSITION -u OUTIS_GPU_DECOMMIT -u OUTIS_GPU_OOD -u OUTIS_GPU_FRI REPLAY_JSON=1 ${threads:+RAYON_NUM_THREADS=$threads} \
     $(mode_env "$1") "$bin" replay "captures/$2" > "$log" 2>&1 || true
+  fi
   [ "$3" = warmup ] || python3 - "$log" "$out" "$version" "$commit" "$device" "$os" "$cpu" "$1" "$2" "$3" <<'PY'
 import json, re, sys, datetime
 log, out, version, commit, device, os_, cpu, mode, capture, rep = sys.argv[1:]
@@ -66,7 +82,13 @@ text = open(log, errors="replace").read()
 line = {"version": version, "commit": commit, "date": datetime.datetime.now().isoformat(timespec="seconds"),
         "device": device, "os": os_, "cpu": cpu, "mode": mode, "capture": capture, "rep": int(rep)}
 m = re.search(r"^report-json: (.*)$", text, re.M)
-if m:
+w = re.search(r"^MEM proved: wasm (\d+) live \d+ peak (\d+)", text, re.M)
+p = re.search(r"^proved in ([\d.]+) s: .*?(IDENTICAL|DIFFERENT) to the native proof", text, re.M)
+if mode == "wasm" and w and p:
+    # The capture's response is the native prover's verified proof, so identical means verified.
+    line.update(threads=1, prove_s=float(p.group(1)), identical=p.group(2) == "IDENTICAL",
+                verified=p.group(2) == "IDENTICAL", peak_run_mib=int(w.group(1)), peak_live_mib=int(w.group(2)))
+elif m:
     r = json.loads(m.group(1))
     peak = r.get("peak", {})
     line.update(threads=r["threads"], prove_s=round(r["prove_s"], 3), total_s=round(r["total_s"], 3),
