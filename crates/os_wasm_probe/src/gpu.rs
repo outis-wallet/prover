@@ -17,3 +17,40 @@ pub use native::*;
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use stwo::core::vcs_lifted::blake2_merkle::Blake2sMerkleChannel;
+use stwo::prover::backend::simd::SimdBackend;
+use stwo::prover::{StripedCommitHook, set_striped_commit_hook};
+
+type CommitHook = Arc<StripedCommitHook<SimdBackend, Blake2sMerkleChannel>>;
+
+/// Whether the counting hook (see `set_commit_hook`) is registered.
+static COUNTED: AtomicBool = AtomicBool::new(false);
+
+/// Registers `hook` as the striped commitment's (`None`: the CPU makes every commitment, as with
+/// no hook), behind one that counts each commitment as it starts, for the proof's progress
+/// (progress.rs). Without a hook of its own it gives the polynomials back as they came, and stwo
+/// commits them itself: the proof is the same as with no hook at all.
+pub(crate) fn set_commit_hook(hook: Option<CommitHook>) {
+    COUNTED.store(true, Ordering::Relaxed);
+    set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(Some(Arc::new(
+        move |polynomials, log_blowup, twiddles, lifting_log_size| {
+            crate::progress::commitment_starts();
+            match &hook {
+                Some(hook) => hook(polynomials, log_blowup, twiddles, lifting_log_size),
+                None => Err(polynomials),
+            }
+        },
+    )));
+}
+
+/// Counts the commitments from now on, where nothing registered a hook yet (a proof on the CPU
+/// that never had the GPU turned on or off).
+pub(crate) fn count_commitments() {
+    if !COUNTED.load(Ordering::Relaxed) {
+        set_commit_hook(None);
+    }
+}

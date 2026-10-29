@@ -190,6 +190,8 @@ pub unsafe extern "C" fn tx_session_open(
         let header_json = unsafe { argument(header_json, "header_json") }?;
         let rpc_transaction_json = unsafe { argument(rpc_transaction_json, "rpc_transaction_json") }?;
         let mut session = TxSession::new(chain_id, header_json, rpc_transaction_json).map_err(|f| f.0)?;
+        // The last proof's count isn't this one's (tx_prove_progress before its proof starts).
+        crate::progress::session_opens();
         let cancel = Arc::new(AtomicBool::new(false));
         session.set_cancel_flag(cancel.clone());
         let pool = rayon::ThreadPoolBuilder::new()
@@ -406,6 +408,14 @@ pub extern "C" fn tx_prove_set_gpu_keep_warm(milliseconds: u32) -> *mut c_char {
     });
     let answer = catch_unwind(set).unwrap_or_else(|panic| json!({ "error": panic_message(panic) }));
     into_c_string(answer.to_string())
+}
+
+/// The striped commitments the proof under way (or the last one) has started, for a progress bar
+/// (progress.rs): a proof of the same kind makes the same ones, CPU or GPU. Safe from any thread
+/// while a call runs, as a plain read; 0 in a library built without the `gpu` feature.
+#[unsafe(no_mangle)]
+pub extern "C" fn tx_prove_progress() -> u32 {
+    crate::progress::commitments()
 }
 
 /// A C string argument as UTF-8.

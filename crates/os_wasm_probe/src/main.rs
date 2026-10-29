@@ -18,7 +18,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use os_wasm_probe::native::{
-    tx_session_call, tx_session_cancel, tx_session_close, tx_session_open, TxNativeSession,
+    tx_prove_progress, tx_session_call, tx_session_cancel, tx_session_close, tx_session_open, TxNativeSession,
 };
 use os_wasm_probe::replay::{identical, tx_prove_free, Phase, Progress, Recording};
 use serde_json::{json, Value};
@@ -476,8 +476,32 @@ fn ffi(
 
     let Some(cancel_after) = cancel_after else {
         let prove_started = Instant::now();
+        // The progress a wallet reads while the proof runs (tx_prove_progress): when each
+        // commitment started, from another thread, as the apps poll it.
+        let proving = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let watcher = {
+            let proving = proving.clone();
+            std::thread::spawn(move || {
+                let mut starts = Vec::new();
+                while proving.load(std::sync::atomic::Ordering::Relaxed) {
+                    let count = tx_prove_progress() as usize;
+                    while starts.len() < count {
+                        starts.push(prove_started.elapsed().as_secs_f64());
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                starts
+            })
+        };
         let answer = session.answer("prove", json!([]));
         let prove_s = prove_started.elapsed().as_secs_f64();
+        proving.store(false, std::sync::atomic::Ordering::Relaxed);
+        let starts = watcher.join().unwrap();
+        println!(
+            "progress: {} commitments, started at {} s of the prove",
+            starts.len(),
+            starts.iter().map(|at| format!("{at:.2}")).collect::<Vec<_>>().join(" "),
+        );
         // With GPU hooks beyond the commitment, how the proof was verified before it was returned.
         if let Some(report) = answer.get("gpu_self_verify") {
             println!("prove's gpu_self_verify: {report}");

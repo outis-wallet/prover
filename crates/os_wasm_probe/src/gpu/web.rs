@@ -29,7 +29,7 @@ use stwo::prover::poly::BitReversedOrder;
 use stwo::prover::poly::circle::{CircleCoefficients, CircleEvaluation, part_domain};
 use stwo::prover::poly::twiddles::TwiddleTree;
 use stwo::prover::vcs_lifted::prover::MerkleProverLifted;
-use stwo::prover::{CommitmentTreeProver, Poly, set_striped_commit_hook};
+use stwo::prover::{CommitmentTreeProver, Poly};
 use stwo_gpu_bridge::{self as bridge, commit as d, op};
 use wasm_bindgen::prelude::*;
 
@@ -73,13 +73,13 @@ pub fn gpu_enable(deadline_ms: f64) {
     DEADLINE_MS.store(deadline_ms.to_bits(), Ordering::Relaxed);
     ENABLED_AT.store(now().to_bits(), Ordering::Relaxed);
     LAST_GPU_END.store(0, Ordering::Relaxed);
-    set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(Some(Arc::new(commit)));
+    super::set_commit_hook(Some(Arc::new(commit)));
 }
 
-/// Commits on the CPU again.
+/// Commits on the CPU again (still counted, see gpu.rs).
 #[wasm_bindgen]
 pub fn gpu_disable() {
-    set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(None);
+    super::set_commit_hook(None);
 }
 
 /// The commitments the hook saw since the last call, as a JSON array: per commitment its shape,

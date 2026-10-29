@@ -88,6 +88,13 @@ with each proof (`gpuPort` in the message to `engine/worker.mjs`), which attache
 module's memory before the proof and detaches it after. Without a port, or without WebGPU, the
 build proves on the CPU.
 
+A page can follow the proof as it runs: with `progressPort` in the message (a `MessagePort`), a
+worker of the engine's own posts on it the number of striped commitments the proof has started,
+each time it changes (`src/progress.rs`). A proof of the same kind makes the same ones in the
+same order, on the CPU or the GPU, so with an earlier proof's times the count says how far along
+this one is. Natively, `tx_prove_progress()` reads the same count from any thread. It is counted
+in builds with feature `gpu` (the ones the wallets ship); other builds close the port unused.
+
 The Outis Prover apps (iOS and Android) link the pipeline as a static library built from this
 repository (`--crate-type staticlib` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and
 `aarch64-linux-android`) and bundle the captures. `scripts/build-android.sh` builds the Android

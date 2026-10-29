@@ -140,6 +140,30 @@ function watchMemory(memory, port) {
   return new Promise((resolve) => { watcher.onmessage = watcher.onerror = resolve; });
 }
 
+// The proof's progress: the striped commitments it has started (src/progress.rs), which a proof of
+// the same kind makes in the same order, on the CPU or the GPU. This worker is inside the proof's
+// synchronous call, so, as for the memory figure, a worker of its own (progress-watcher.mjs) reads
+// the count from the shared wasm memory and posts it, each time it changes, on the port the page
+// sent (progressPort). Builds without the count, or a watcher that can't start, close the port
+// unused: the proof is made all the same.
+const hasProgress = (memory) => typeof pkg.progress_address === "function" && memory.buffer instanceof SharedArrayBuffer;
+
+async function watchProgress(memory, port) {
+  if (!port) return;
+  try {
+    if (!hasProgress(memory)) throw new Error("this build doesn't count its commitments");
+    const watcher = new Worker(new URL("./progress-watcher.mjs", import.meta.url));
+    watcher.postMessage({ memory, address: pkg.progress_address(), port }, [port]);
+    // Running before this worker blocks, as the memory watcher.
+    await new Promise((resolve) => { watcher.onmessage = watcher.onerror = resolve; });
+  } catch {
+    port.close();
+  }
+}
+
+/** The striped commitments the last proof started, for the report (null in a build without the count). */
+const commitmentsMade = (memory) => (hasProgress(memory) ? Atomics.load(new Int32Array(memory.buffer, pkg.progress_address(), 1), 0) : null);
+
 // The prover's panic message: its panic hook writes it to console.error just before the trap,
 // whose own message is only "unreachable". Kept to send with the error.
 let panicMessage = "";
@@ -178,7 +202,7 @@ function portRpc(port) {
  * facts and its messages, as starknet_proveTransaction answers, after checking it with the verifier,
  * and how long each step took.
  */
-async function proveLive({ transaction, chainId, blockNumber, first }, threads, rpcPort, port, gpuDeadlineMs, event) {
+async function proveLive({ transaction, chainId, blockNumber, first }, threads, rpcPort, port, gpuDeadlineMs, event, progressPort) {
   const since = (start) => (performance.now() - start) / 1000;
   const started = performance.now();
   event({ event: "phase", phase: "load" });
@@ -186,6 +210,7 @@ async function proveLive({ transaction, chainId, blockNumber, first }, threads, 
   await pkg.initThreadPool(threads);
   const gpu = await attachGpu(port, wasm.memory, gpuDeadlineMs);
   if (gpu) event({ event: "gpu", ...gpu });
+  await watchProgress(wasm.memory, progressPort);
   const loadS = since(started);
 
   const inputStarted = performance.now();
@@ -230,6 +255,7 @@ async function proveLive({ transaction, chainId, blockNumber, first }, threads, 
       prove_s: proveS,
       verify_s: verifyS,
       total_s: since(started),
+      commitments: commitmentsMade(wasm.memory),
       peak: { run_mib: Number(memoryParts[1] || 0), live_peak_mib: Number(memoryParts[3] || 0) },
       gpu: gpuReport,
     },
@@ -254,11 +280,11 @@ async function failed(error) {
   self.postMessage({ error: lines.filter(Boolean).join("\n") });
 }
 
-self.onmessage = async ({ data: { action, live, threads, memoryPort, rpcPort, gpuPort: port, gpuDeadlineMs, cpuTimes } }) => {
+self.onmessage = async ({ data: { action, live, threads, memoryPort, progressPort, rpcPort, gpuPort: port, gpuDeadlineMs, cpuTimes } }) => {
   const event = (payload) => self.postMessage({ event: payload });
   if (live) {
     try {
-      const result = await proveLive(live, threads, rpcPort, port, gpuDeadlineMs, event);
+      const result = await proveLive(live, threads, rpcPort, port, gpuDeadlineMs, event, progressPort);
       await endChildren();
       self.postMessage({ result });
     } catch (error) {
@@ -275,6 +301,7 @@ self.onmessage = async ({ data: { action, live, threads, memoryPort, rpcPort, gp
     await pkg.initThreadPool(threads);
     let gpu = await attachGpu(port, wasm.memory, gpuDeadlineMs);
     if (gpu) event({ event: "gpu", ...gpu });
+    await watchProgress(wasm.memory, progressPort);
     // A bench's reference for the GPU's times: the CPU's commitments timed (feature gpu builds).
     if (cpuTimes && !gpu && typeof pkg.gpu_time_cpu_commitments === "function" && pkg.gpu_time_cpu_commitments()) {
       gpu = { attached: false, cpu_times: true };
@@ -348,6 +375,7 @@ self.onmessage = async ({ data: { action, live, threads, memoryPort, rpcPort, gp
         prove_s: proveS,
         verify_s: verifyS,
         total_s: totalS,
+        commitments: commitmentsMade(wasm.memory),
         os_steps: osSteps,
         verified,
         verify_error: verifyError,

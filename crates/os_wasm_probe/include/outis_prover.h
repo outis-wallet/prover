@@ -35,6 +35,12 @@ char *tx_session_call(TxNativeSession *session, const char *method, const char *
    waits), but not once tx_session_close has been called. */
 void tx_session_cancel(TxNativeSession *session);
 
+/* The striped commitments the proof under way (or the last one) has started: a proof of the same
+   kind makes the same ones in the same order, on the CPU or the GPU, so with an earlier proof's
+   times it tells how far along this one is. Safe from any thread while a call runs (a plain read).
+   Counted in a library built with the gpu feature; 0 in others. */
+uint32_t tx_prove_progress(void);
+
 /* Frees the session. Must not race a running call: if one is still running, this blocks until it
    returns (cancel first to make that quick). No call or cancel may start once this is called. */
 void tx_session_close(TxNativeSession *session);

@@ -59,7 +59,7 @@ rm -f "$OUT"/pkg-mt/snippets/*/src/workerHelpers.js.bak
 
 # The engine.
 sed "s|__WASM_FILE__|$wasm_file|" js/worker.mjs > "$OUT/engine/worker.mjs"
-cp js/tx-driver.mjs js/gpu.mjs "$OUT/engine/"
+cp js/tx-driver.mjs js/gpu.mjs js/progress-watcher.mjs "$OUT/engine/"
 
 # The GPU worker, in the layout its script imports its module from (pkg/gpu/).
 if [ -n "$GPU_WEB" ]; then

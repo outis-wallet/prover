@@ -36,7 +36,7 @@ use stwo::core::fields::m31::BaseField;
 use stwo::prover::poly::BitReversedOrder;
 use stwo::prover::poly::circle::CircleEvaluation;
 use stwo::prover::{
-    set_fri_quotients_hook, set_ood_sample_hook, set_striped_commit_hook, set_striped_decommit_hook,
+    set_fri_quotients_hook, set_ood_sample_hook, set_striped_decommit_hook,
     FriQuotientsRequest, OodSampleGroup, Poly, StripedCommitHook,
 };
 use stwo_constraint_framework::{set_trace_part_hook, TracePartHook, TracePartRequest};
@@ -650,7 +650,7 @@ fn apply_composition(committer: &Arc<GpuCommitter>) {
 fn apply(enabled: bool) -> Result<Option<String>, String> {
     *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = enabled;
     if !enabled {
-        set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(None);
+        super::set_commit_hook(None);
         set_trace_part_hook(None);
         set_constraint_eval_hook(None);
         set_striped_decommit_hook::<SimdBackend>(None);
@@ -703,7 +703,7 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
     // The FRI quotients on the GPU only with a mode (`OUTIS_GPU_FRI`, `set_fri`) and the
     // decommitment's.
     apply_fri(&committer);
-    set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(Some(hook(committer)));
+    super::set_commit_hook(Some(hook(committer)));
     tracing::info!("GPU commitment on: {adapter}");
     Ok(Some(adapter))
 }

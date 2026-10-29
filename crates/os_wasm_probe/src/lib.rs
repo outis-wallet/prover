@@ -8,6 +8,7 @@ mod executor;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod memory;
+pub mod progress;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 #[cfg(not(target_arch = "wasm32"))]
@@ -601,6 +602,8 @@ impl TxSession {
         #[cfg(not(target_arch = "wasm32"))]
         self.check_cancel()?;
         let pie = self.pie.take().expect("the virtual OS ran");
+        // Its commitments counted from 0, for the wallet's progress bar (progress.rs).
+        crate::progress::proof_starts();
         // What built the OS input is of no more use: it goes before the proof's peak.
         self.maps = StateMaps::default();
         self.classes = HashMap::new();
