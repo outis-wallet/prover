@@ -93,7 +93,7 @@ worker of the engine's own posts on it the number of striped commitments the pro
 each time it changes (`src/progress.rs`). A proof of the same kind makes the same ones in the
 same order, on the CPU or the GPU, so with an earlier proof's times the count says how far along
 this one is. Natively, `tx_prove_progress()` reads the same count from any thread. It is counted
-in builds with feature `gpu` (the ones the wallets ship); other builds close the port unused.
+in builds with feature `gpu` (the ones the wallets ship); in others it stays 0.
 
 The Outis Prover apps (iOS and Android) link the pipeline as a static library built from this
 repository (`--crate-type staticlib` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and
