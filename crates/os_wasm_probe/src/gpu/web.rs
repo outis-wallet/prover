@@ -21,7 +21,7 @@ use stwo::core::ColumnVec;
 use stwo::core::fields::m31::BaseField;
 use stwo::core::poly::circle::CanonicCoset;
 use stwo::core::vcs::blake2_hash::Blake2sHash;
-use stwo::core::vcs_lifted::blake2_merkle::Blake2sM31MerkleChannel;
+use stwo::core::vcs_lifted::blake2_merkle::Blake2sMerkleChannel;
 use stwo::prover::backend::Column;
 use stwo::prover::backend::simd::SimdBackend;
 use stwo::prover::backend::simd::column::BaseColumn;
@@ -33,7 +33,7 @@ use stwo::prover::{CommitmentTreeProver, Poly, set_striped_commit_hook};
 use stwo_gpu_bridge::{self as bridge, commit as d, op};
 use wasm_bindgen::prelude::*;
 
-type Tree = CommitmentTreeProver<SimdBackend, Blake2sM31MerkleChannel>;
+type Tree = CommitmentTreeProver<SimdBackend, Blake2sMerkleChannel>;
 type Polys = ColumnVec<CircleCoefficients<SimdBackend>>;
 
 /// `new_striped`'s `MIN_STRIPED_LOG_SIZE`: columns of smaller domains are kept whole.
@@ -73,13 +73,13 @@ pub fn gpu_enable(deadline_ms: f64) {
     DEADLINE_MS.store(deadline_ms.to_bits(), Ordering::Relaxed);
     ENABLED_AT.store(now().to_bits(), Ordering::Relaxed);
     LAST_GPU_END.store(0, Ordering::Relaxed);
-    set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(Arc::new(commit)));
+    set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(Some(Arc::new(commit)));
 }
 
 /// Commits on the CPU again.
 #[wasm_bindgen]
 pub fn gpu_disable() {
-    set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(None);
+    set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(None);
 }
 
 /// The commitments the hook saw since the last call, as a JSON array: per commitment its shape,

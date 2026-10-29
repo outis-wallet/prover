@@ -1,5 +1,5 @@
 //! The striped commitment on the GPU (feature `gpu`, natively): stwo-gpu-spike's [`GpuCommitter`]
-//! as stwo's striped-commit hook for `(SimdBackend, Blake2sM31MerkleChannel)`, the backend and
+//! as stwo's striped-commit hook for `(SimdBackend, Blake2sMerkleChannel)`, the backend and
 //! channel of both legs of the proof (the Cairo proof and the circuit proof) and of their
 //! preprocessed trees. Every tree `CommitmentTreeProver::new_striped` commits on its striped path
 //! goes to the GPU: in a privacy proof, all eight (each leg's preprocessed, base, interaction and
@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use stwo::core::poly::circle::CanonicCoset;
-use stwo::core::vcs_lifted::blake2_merkle::Blake2sM31MerkleChannel;
+use stwo::core::vcs_lifted::blake2_merkle::Blake2sMerkleChannel;
 use stwo::prover::backend::simd::SimdBackend;
 use stwo::prover::poly::circle::{part_domain, PolyOps};
 use stwo::core::fields::m31::BaseField;
@@ -650,7 +650,7 @@ fn apply_composition(committer: &Arc<GpuCommitter>) {
 fn apply(enabled: bool) -> Result<Option<String>, String> {
     *GPU_ON.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = enabled;
     if !enabled {
-        set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(None);
+        set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(None);
         set_trace_part_hook(None);
         set_constraint_eval_hook(None);
         set_striped_decommit_hook::<SimdBackend>(None);
@@ -703,7 +703,7 @@ fn apply(enabled: bool) -> Result<Option<String>, String> {
     // The FRI quotients on the GPU only with a mode (`OUTIS_GPU_FRI`, `set_fri`) and the
     // decommitment's.
     apply_fri(&committer);
-    set_striped_commit_hook::<SimdBackend, Blake2sM31MerkleChannel>(Some(hook(committer)));
+    set_striped_commit_hook::<SimdBackend, Blake2sMerkleChannel>(Some(hook(committer)));
     tracing::info!("GPU commitment on: {adapter}");
     Ok(Some(adapter))
 }
@@ -737,7 +737,7 @@ fn forced_decline(index: usize) -> bool {
         || decline.split(',').any(|entry| entry.trim().parse::<usize>() == Ok(index))
 }
 
-fn hook(committer: Arc<GpuCommitter>) -> Arc<StripedCommitHook<SimdBackend, Blake2sM31MerkleChannel>> {
+fn hook(committer: Arc<GpuCommitter>) -> Arc<StripedCommitHook<SimdBackend, Blake2sMerkleChannel>> {
     Arc::new(move |polynomials, log_blowup, twiddles, lifting_log_size| {
         let index = CALLS.fetch_add(1, Ordering::Relaxed);
         let columns = polynomials.len();
