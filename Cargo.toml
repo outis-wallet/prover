@@ -2,7 +2,7 @@
 # browser (wasm32). Built on StarkWare's sequencer and prover, through Outis's forks of both:
 # - sequencer: github.com/outis-wallet/sequencer, tag outis-v0.3.0 (main-v0.14.4 at 148de445, whose
 #              proving revision Sepolia verifies, + wasm32 fixes)
-# - proving:   github.com/outis-wallet/proving, tag outis-v0.3.0 (e0035ffc + the striped prover and
+# - proving:   github.com/outis-wallet/proving, tag outis-v0.3.1 (e0035ffc + the striped prover and
 #              the GPU commitment natively and in browsers, feature gpu)
 [workspace]
 resolver = "2"
@@ -25,8 +25,8 @@ stwo = { git = "https://github.com/starkware-libs/proving", rev = "e0035ffc8e08d
 stwo-constraint-framework = { git = "https://github.com/starkware-libs/proving", rev = "e0035ffc8e08da270b8cb4a71f3708af70c2c775" }
 # The striped commitment on a GPU (the prover's `gpu` feature), from the fork: natively through
 # wgpu, and in browsers the bridge to a page's WebGPU worker (no dependencies).
-stwo-gpu-spike = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-gpu-bridge = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
+stwo-gpu-spike = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-gpu-bridge = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
 # The rest, at the sequencer's versions.
 cairo-lang-starknet-classes = "2.19.6"
 cairo-lang-utils = "2.19.6"
@@ -48,29 +48,29 @@ tracing-subscriber = "0.3.16"
 c-kzg = { path = "wasm-stubs/c-kzg" }
 
 [patch."https://github.com/starkware-libs/proving"]
-cairo-air = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-cairo-program-runner-lib = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuit-cairo-verifier = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuit-common = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuit-prover = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuit-registry = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuit-serialize = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuit-verifier = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuits = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-circuits-stark-verifier = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-leaf-proof-format = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-leaf-prover = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-privacy-circuit-verify = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-privacy_common = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-privacy-prove = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-air-utils = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-air-utils-derive = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-cairo-adapter = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-cairo-common = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-cairo-prover = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-cairo-serialize = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-cairo-serialize-derive = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-cairo-utils = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
-stwo-constraint-framework = { git = "https://github.com/outis-wallet/proving", rev = "c96ed53589303c3fa6eb655dd478870b2184c81c" }
+cairo-air = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+cairo-program-runner-lib = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuit-cairo-verifier = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuit-common = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuit-prover = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuit-registry = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuit-serialize = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuit-verifier = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuits = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+circuits-stark-verifier = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+leaf-proof-format = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+leaf-prover = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+privacy-circuit-verify = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+privacy_common = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+privacy-prove = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-air-utils = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-air-utils-derive = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-cairo-adapter = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-cairo-common = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-cairo-prover = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-cairo-serialize = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-cairo-serialize-derive = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-cairo-utils = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
+stwo-constraint-framework = { git = "https://github.com/outis-wallet/proving", rev = "8e5804afdc0f3453436f291f6e8a04604c3484a3" }
 

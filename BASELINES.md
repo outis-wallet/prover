@@ -19,6 +19,36 @@ counted here was byte-identical to the native prover's response in the capture a
   an app); on Android, RSS plus the GPU driver's allocations (kgsl) at the same moment; in the
   wasm mode, the wasm memory (what a browser tab holds for the proof).
 
+## v0.3.1: the wasm time back near v0.2.1's
+
+outis-wallet/proving `outis-v0.3.1` (`8e5804af`): `outis-v0.3.0` plus one wasm32-only change, so
+the native build, the Android and iOS libraries and every proof are unchanged. It answers v0.3.0's
+open question, why the wasm build got 5 to 17% slower while the native one did not: once upstream
+`e0035ffc` was merged in, LLVM inlined the wasm field multiplication (`mul_doubled_wasm`) into the
+FFT's loops, where V8 ran it slower. In a V8 CPU profile of pay, single-threaded, the FFTs with
+their multiplications took 74 s against v0.2.1's 55 s. Kept out of line (`#[inline(never)]`), as
+v0.2.1's build had it, pay proven alternately with v0.2.1 in Node took 152.9 s against 150.3 s.
+
+Prove time and wasm memory, wasm (Node, 1 thread), v0.2.1 -> v0.3.0 -> v0.3.1. One run each.
+
+| capture | v0.2.1 | v0.3.0 | v0.3.1 | wasm memory |
+|---|---|---|---|---|
+| register | 151.6 s | 159.1 s | **145.4 s** | 1,932 MiB |
+| deposit | 166.1 s | 183.9 s | **170.0 s** | 1,987 MiB |
+| pay | 147.7 s | 168.4 s | **154.1 s** | 2,027 MiB |
+| withdraw | 150.8 s | 175.7 s | **160.4 s** | 2,027 MiB |
+
+7.6 to 8.7% faster than v0.3.0 on every capture, -4 to +6% against v0.2.1 (whose runs are from
+another day; alternated on the same day, pay was within 2%). The wasm memory is unchanged to the
+MiB. Native, one run each at 18 threads: 9.67 to 10.75 s, peaks 2,344 to 2,436 MiB, as v0.3.0's
+within noise (the native code is the same); the GPU modes not rerun for the same reason.
+
+Results:
+- `bench/results/v0.3.1/rtx3080-i9.jsonl`: bench/run.sh, one rep of cpu and wasm, on this
+  release's sources before its commit (each line's `note`).
+- Not measured: the threaded build in a browser (Chrome's 16 threads, which outis.cash/prover and
+  the wallet run), the M5 Pro, the iPhones. The phones prove natively, which this does not change.
+
 ## v0.3.0: the revision Sepolia verifies, the same native time and memory
 
 outis-wallet/proving `outis-v0.3.0` (upstream `e0035ffc` merged into `outis-v0.2.1`) and
@@ -39,8 +69,8 @@ Native, across the four captures: prove times within noise in every mode (-14 to
 direction: cpu -6.1 to +6.1%, gpu -8.5 to +9.0%, full -14 to +12%), peaks within 50 MiB. The wasm
 memory is unchanged to the MiB (2,027 / 1,987 / 1,932 / 2,027). The wasm time is not: 5 to 17%
 slower on all four captures (pay 148 -> 168 s), and pay proven alternately by both builds in Node
-gave v0.2.1 155 and 149 s, v0.3.0 172 and 178 s. Not yet explained: the FRI parameters are
-unchanged and the new proof of work is 16 bits; natively, at 18 threads, nothing slowed.
+gave v0.2.1 155 and 149 s, v0.3.0 172 and 178 s; natively, at 18 threads, nothing slowed. The
+cause and its fix: v0.3.1.
 
 End to end, 2026-10-29: a payment proven by this build's wasm in Node, live against the node
 (`js/serve.mjs`, 164.5 s), accepted by Sepolia in

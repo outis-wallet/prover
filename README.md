@@ -31,7 +31,7 @@ The prover and the sequencer come from StarkWare's repositories, through two for
   `main-v0.14.4` at `148de445` (the release branch's move to proving `e0035ffc`, whose proofs
   Sepolia verifies since 2026-10-28) plus two commits of wasm32 portability fixes. Until v0.2.1 it
   was `PRIVACY-0.14.4-RC.0` (tag `outis-v0.2.1`), whose proofs Sepolia refuses.
-- [outis-wallet/proving](https://github.com/outis-wallet/proving): tag `outis-v0.3.0`, `e0035ffc`,
+- [outis-wallet/proving](https://github.com/outis-wallet/proving): tag `outis-v0.3.1`, `e0035ffc`,
   the revision that sequencer pins, merged into our branch: the provably.fast frontier, our striped
   prover (peak memory about 2.5 GiB instead of about 5.9 GiB on the provably.fast benchmark), the
   GPU commitment, and wasm32 and Android fixes. Its `OUTIS.md` says what each commit is and whose.
