@@ -19,7 +19,7 @@ counted here was byte-identical to the native prover's response in the capture a
   an app); on Android, RSS plus the GPU driver's allocations (kgsl) at the same moment; in the
   wasm mode, the wasm memory (what a browser tab holds for the proof).
 
-## v0.3.1: the wasm time back near v0.2.1's
+## v0.3.1: the single-threaded wasm's time back near v0.2.1's
 
 outis-wallet/proving `outis-v0.3.1` (`8e5804af`): `outis-v0.3.0` plus one wasm32-only change, so
 the native build, the Android and iOS libraries and every proof are unchanged. It answers v0.3.0's
@@ -46,8 +46,25 @@ within noise (the native code is the same); the GPU modes not rerun for the same
 Results:
 - `bench/results/v0.3.1/rtx3080-i9.jsonl`: bench/run.sh, one rep of cpu and wasm, on this
   release's sources before its commit (each line's `note`).
-- Not measured: the threaded build in a browser (Chrome's 16 threads, which outis.cash/prover and
-  the wallet run), the M5 Pro, the iPhones. The phones prove natively, which this does not change.
+- Not measured: the M5 Pro, the iPhones. The phones prove natively, which this does not change.
+
+In a browser, the threaded build (`scripts/build-wasm.sh web`, what outis.cash/prover and the
+wallet run), v0.3.0's engine (`7c812296f645`) and v0.3.1's (`2a8831453eed`) alternately, a fresh
+worker per proof (Chrome 152 in the Claude desktop app, cross-origin isolated, same machine). Every
+proof verified and byte-identical:
+
+| capture | 16 threads, v0.3.0 -> v0.3.1 | wasm memory |
+|---|---|---|
+| register | 13.44 -> 13.07 s | 2,031 -> 2,064 MiB |
+| deposit | 14.25 -> 14.44 s | 2,096 -> 2,081 MiB |
+| pay | 13.63 -> 14.11 s | 2,147 -> 2,132 MiB |
+| withdraw | 15.10 -> 15.97 s | 2,148 -> 2,118 MiB |
+
+Pay at one thread: 141.4 -> 144.6 s. So the threaded build was not slowed in v0.3.0 (v0.2.1's pay
+took 13.5 s at 16 threads in Chrome 154, in its entry below), and v0.3.1 leaves it as it was. It is
+compiled with its own std (`-Z build-std`) and atomics, where LLVM's inlining evidently differs
+(not checked in a profile). The fix is the single-threaded build's (Node: `js/replay.mjs`,
+`js/serve.mjs`).
 
 ## v0.3.0: the revision Sepolia verifies, the same native time and memory
 
