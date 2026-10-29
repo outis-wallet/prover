@@ -19,6 +19,40 @@ counted here was byte-identical to the native prover's response in the capture a
   an app); on Android, RSS plus the GPU driver's allocations (kgsl) at the same moment; in the
   wasm mode, the wasm memory (what a browser tab holds for the proof).
 
+## v0.3.0: the revision Sepolia verifies, the same native time and memory
+
+outis-wallet/proving `outis-v0.3.0` (upstream `e0035ffc` merged into `outis-v0.2.1`) and
+outis-wallet/sequencer `outis-v0.3.0` (`main-v0.14.4` at `148de445` plus the wasm32 fixes): the
+revisions whose proofs Sepolia's gateway verifies since 2026-10-28; v0.2.1's are refused
+("Unknown preprocessed root"). The proof changes (more zk-blinding rows in the circuit, one
+Blake2s channel not reduced to M31, an out-of-domain-sample proof of work); the captures'
+references were proven again by the transaction prover at `148de445` from each capture's own
+recording (`scripts/recording-node.py`), and every proof below is byte-identical to them.
+
+Pay, prove time and peak memory, v0.2.1 -> v0.3.0. Medians of 3 runs, wasm 1.
+
+| device | threads | cpu | gpu | full | lean | wasm (Node, 1 thread) |
+|---|---|---|---|---|---|---|
+| Linux, i9-10980XE (18 cores) + RTX 3080 | 18 | 9.59 -> 9.65 s, 2,365 -> 2,414 MiB | 6.54 -> 6.61 s, 2,772 -> 2,789 MiB | 4.46 -> 4.44 s, 2,769 -> 2,778 MiB | not for discrete GPUs | 148 -> **168 s**, 2,027 -> 2,027 MiB |
+
+Native, across the four captures: prove times within noise in every mode (-14 to +12%, no
+direction: cpu -6.1 to +6.1%, gpu -8.5 to +9.0%, full -14 to +12%), peaks within 50 MiB. The wasm
+memory is unchanged to the MiB (2,027 / 1,987 / 1,932 / 2,027). The wasm time is not: 5 to 17%
+slower on all four captures (pay 148 -> 168 s), and pay proven alternately by both builds in Node
+gave v0.2.1 155 and 149 s, v0.3.0 172 and 178 s. Not yet explained: the FRI parameters are
+unchanged and the new proof of work is 16 bits; natively, at 18 threads, nothing slowed.
+
+End to end, 2026-10-29: a payment proven by this build's wasm in Node, live against the node
+(`js/serve.mjs`, 164.5 s), accepted by Sepolia in
+`0x0408c1cbcdcc411cd2d370890da7cb43c2f773f061997dffee8a1c50b9ed3423`.
+
+Results:
+- `bench/results/v0.3.0/rtx3080-i9.jsonl`: bench/run.sh, 3 reps of cpu, gpu and full and one of
+  wasm, on the candidate built by path from the same code (each line's `note`); compared with
+  `v0.2.1/rtx3080-i9.jsonl`.
+- Not measured yet: the M5 Pro, the S25+, Chrome (the threaded wasm, unverified on v0.3.0), the
+  iPhones.
+
 ## v0.2.1: less memory, the same time
 
 outis-wallet/proving `outis-v0.2.1`: v0.2.0's prover plus two memory cuts, both from the

@@ -15,23 +15,26 @@ WebAssembly (threaded, on Web Workers; [outis.xyz/prover](https://outis.xyz/prov
 | `crates/os_wasm_probe` | The pipeline. `TxSession` (wasm and native): the transaction's execution and storage proofs from RPC reads, the virtual OS input, the OS run, the proof. `os_native_probe`: the native command line. `native`: the C interface a wallet app proves a live transaction through (`include/outis_prover.h`): a session per transaction, called method by method with JSON as `js/tx-driver.mjs` calls the wasm one, and cancellable. `replay`: the C entry point `tx_prove_replay` with progress events, for the Outis Prover apps. |
 | `js/tx-driver.mjs` | The JavaScript side of `TxSession`: the RPC reads and the miss loop, over any async RPC, with the wasm session or an async one (an app's native session). |
 | `js/replay.mjs` | Proves a capture with the wasm build in Node. |
+| `js/serve.mjs` | `starknet_proveTransaction` answered by the wasm build in Node, live against a node, as a wallet's page proves (the transaction never sent to the node): for submitting a proof made the client's way through the SDK or the spike. |
 | `js/worker.mjs` | The web engine's worker: proves a bundled capture in a browser and reports progress and the result (outis.xyz/prover). |
-| `captures/` | Four Privacy Pool transactions on Starknet Sepolia (register, deposit, pay, withdraw): the recorded RPC answers, the prove request and the native prover's response, the reference for byte identity. The contract classes are in `captures/classes`, symlinked from each capture (on Windows, enable git's `core.symlinks`). |
+| `captures/` | Four Privacy Pool transactions on Starknet Sepolia (register, deposit, pay, withdraw): the recorded RPC answers, the prove request and StarkWare's transaction prover's response, the reference for byte identity (since v0.3.0 re-proven by the transaction prover at `148de445` from each capture's own recording, `scripts/recording-node.py`). The contract classes are in `captures/classes`, symlinked from each capture (on Windows, enable git's `core.symlinks`). |
 | `wasm-stubs/c-kzg` | An empty `c-kzg`: the C library has no wasm32 build, and the proving path never calls it. |
 | `js/gpu.mjs` | A page's GPU worker for the web engine (builds with feature `gpu`): the striped commitments on WebGPU. |
-| `scripts/` | `build-native.sh`, `build-wasm.sh [node\|web\|web-gpu]`, `build-web-engine.sh <out>` (the worker, the wasm and the captures, for a page that proves in the browser), `build-android.sh` (the static library for Android apps). |
+| `scripts/` | `build-native.sh`, `build-wasm.sh [node\|web\|web-gpu]`, `build-web-engine.sh <out>` (the worker, the wasm and the captures, for a page that proves in the browser), `build-android.sh` (the static library for Android apps), `recording-node.py` (a node answering from a capture's recording, to re-prove its transaction with a newer prover). |
 
 ## Upstream
 
-The prover and the sequencer come from StarkWare's repositories, through two forks whose
-`outis` branches are upstream's revision plus our commits (`Cargo.toml` pins both):
+The prover and the sequencer come from StarkWare's repositories, through two forks, upstream's revision plus our commits, tagged per release
+(`Cargo.toml` pins both):
 
-- [outis-wallet/sequencer](https://github.com/outis-wallet/sequencer): `PRIVACY-0.14.4-RC.0`
-  plus one commit, small wasm32 portability fixes.
-- [outis-wallet/proving](https://github.com/outis-wallet/proving): `2b495a36`, the revision that
-  sequencer release pins, plus the provably.fast frontier, our striped prover (peak memory about
-  2.5 GiB instead of about 5.9 GiB on the provably.fast benchmark), and wasm32 and Android fixes.
-  Its `OUTIS.md` says what each commit is and whose.
+- [outis-wallet/sequencer](https://github.com/outis-wallet/sequencer): tag `outis-v0.3.0`,
+  `main-v0.14.4` at `148de445` (the release branch's move to proving `e0035ffc`, whose proofs
+  Sepolia verifies since 2026-10-28) plus two commits of wasm32 portability fixes. Until v0.2.1 it
+  was `PRIVACY-0.14.4-RC.0` (tag `outis-v0.2.1`), whose proofs Sepolia refuses.
+- [outis-wallet/proving](https://github.com/outis-wallet/proving): tag `outis-v0.3.0`, `e0035ffc`,
+  the revision that sequencer pins, merged into our branch: the provably.fast frontier, our striped
+  prover (peak memory about 2.5 GiB instead of about 5.9 GiB on the provably.fast benchmark), the
+  GPU commitment, and wasm32 and Android fixes. Its `OUTIS.md` says what each commit is and whose.
 
 ## Building
 
