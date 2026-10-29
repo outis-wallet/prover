@@ -19,6 +19,22 @@ counted here was byte-identical to the native prover's response in the capture a
   an app); on Android, RSS plus the GPU driver's allocations (kgsl) at the same moment; in the
   wasm mode, the wasm memory (what a browser tab holds for the proof).
 
+## v0.3.2: the proof's progress
+
+The same pins as v0.3.1, and the same proofs: v0.3.2 adds a count of the striped commitments a
+proof has started (`src/progress.rs`), read while it runs (`progressPort` in the web engine,
+`tx_prove_progress` natively) for the wallets' progress bars. Each capture makes 8, on the CPU and
+the GPU. The count is kept at the striped commitment's hook, which with the GPU off gives the
+polynomials back for stwo to commit them itself. Not rerun with `bench/run.sh`; checked instead:
+
+- `os_native_probe ffi` (x86-64, feature gpu), the four captures on the CPU and the GPU: every
+  proof identical and verified. Pay 10.1 s against v0.3.1's 10.0 s, withdraw 10.5 s against
+  10.7 s, one run each.
+- The threaded wasm with feature gpu (`2be4a3f9ec40`) in Chrome 152: the four captures identical
+  and verified on the CPU and the GPU (all 8 commitments on the GPU), the count posted while each
+  proved, also under `worker-src 'self'` (the watcher is a file, not a blob: worker). Its times
+  were taken beside another build, so they aren't kept here.
+
 ## v0.3.1: the single-threaded wasm's time back near v0.2.1's
 
 outis-wallet/proving `outis-v0.3.1` (`8e5804af`): `outis-v0.3.0` plus one wasm32-only change, so
